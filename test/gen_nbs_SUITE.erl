@@ -410,15 +410,6 @@ test_msg(_Config) ->
     wait_for_msg(Pid1, {fail, Pid2}),
 
     %%
-    %% Multiple msgs
-    %%
-    gen_nbs:cast(Pid1, {msg_multiple, Msg, Pid2, ?TIMEOUT}),
-    wait_for_msg(Pid2, {msg, Msg, Pid1}),
-    wait_for_msg(Pid2, {msg, Msg, Pid1}),
-    wait_for_msg(Pid1, {ack, Pid2}),
-    wait_for_msg(Pid1, {ack, Pid2}),
-
-    %%
     %% Msg await timeout
     %%
     gen_nbs:cast(Pid1, {msg_await_timeout, ?TIMEOUT}),
@@ -431,6 +422,15 @@ test_msg(_Config) ->
     gen_nbs:cast(Pid1, {msg_manual_ack, Msg, Pid2}),
     wait_for_msg(Pid2, {msg, Msg, Pid1}),
     timer:sleep(?TIMEOUT),
+    wait_for_msg(Pid1, {ack, Pid2}),
+
+    %%
+    %% Multiple msgs
+    %%
+    gen_nbs:cast(Pid1, {msg_multiple, Msg, Pid2, ?TIMEOUT}),
+    wait_for_msg(Pid2, {msg, Msg, Pid1}),
+    wait_for_msg(Pid2, {msg, Msg, Pid1}),
+    wait_for_msg(Pid1, {ack, Pid2}),
     wait_for_msg(Pid1, {ack, Pid2}),
 
     gen_nbs:stop(Pid1),

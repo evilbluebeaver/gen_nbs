@@ -425,6 +425,14 @@ test_msg(_Config) ->
     timer:sleep(?TIMEOUT),
     wait_for_msg(Pid1, {info, timeout}),
 
+    %%
+    %% Manual ack
+    %%
+    gen_nbs:cast(Pid1, {msg_manual_ack, Msg, Pid2}),
+    wait_for_msg(Pid2, {msg, Msg, Pid1}),
+    timer:sleep(?TIMEOUT),
+    wait_for_msg(Pid1, {ack, Pid2}),
+
     gen_nbs:stop(Pid1),
     gen_nbs:stop(Pid2),
     wait_for_exit(Pid1),

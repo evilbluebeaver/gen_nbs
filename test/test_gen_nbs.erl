@@ -58,22 +58,27 @@ handle_cast({timeout, Timeout}, State) ->
     {ok, State, Timeout};
 handle_cast(stop, State) ->
     {stop, normal, State};
+handle_cast({msg_multiple, Msg, To, Timeout}, State) ->
+    Await1 = gen_nbs:msg(To, {ack, Msg}, Timeout),
+    Await2 = gen_nbs:msg(To, {ack, Msg}, Timeout),
+    {await, [Await1, Await2], State};
 handle_cast({msg_no_ack, Msg, To, Timeout}, State) ->
-    gen_nbs:msg(To, Msg, Timeout),
+    Await = gen_nbs:msg(To, Msg, Timeout),
+    {await, Await, State};
+handle_cast({msg_no_await, Msg, To, Timeout}, State) ->
+    _Await = gen_nbs:msg(To, Msg, Timeout),
     {ok, State};
+handle_cast({msg_await_timeout, Timeout}, State) ->
+    {await, [], State, Timeout};
 handle_cast({msg_ack, Msg, To}, State) ->
-    gen_nbs:msg(To, {ack, Msg}),
-    {ok, State};
-handle_cast({msg_suspend, Msg, To, Timeout}, State) ->
-    gen_nbs:msg(To, {ack, Msg}, 0),
-    timer:sleep(Timeout * 2),
-    {ok, State};
+    Await = gen_nbs:msg(To, {ack, Msg}),
+    {await, Await, State};
 handle_cast({msg_long_ack, Msg, To, Timeout}, State) ->
-    gen_nbs:msg(To, {long_ack, Timeout, Msg}, Timeout),
-    {ok, State};
+    Await = gen_nbs:msg(To, {long_ack, Timeout, Msg}, Timeout),
+    {await, Await, State};
 handle_cast({msg_ack_timeout, Msg, To, Timeout}, State) ->
-    gen_nbs:msg(To, {timeout, Timeout, Msg}, Timeout),
-    {ok, State};
+    Await = gen_nbs:msg(To, {timeout, Timeout, Msg}, Timeout),
+    {await, Await, State};
 handle_cast(Msg, State={notify, Pid}) ->
     Pid ! {self(), {cast, Msg}},
     {ok, State}.

@@ -391,6 +391,7 @@ test_msg(_Config) ->
     wait_for_msg(Pid2, {msg, Msg, Pid1}),
     timer:sleep(?TIMEOUT),
     wait_for_msg(Pid1, {fail, Pid2}),
+
     %%
     %% Ack with timeout after it
     %%
@@ -400,12 +401,29 @@ test_msg(_Config) ->
     timer:sleep(?TIMEOUT),
     wait_for_msg(Pid2, {info, timeout}),
 
-    %%%
-    %%% Notify after timeout
-    %%%
-    gen_nbs:cast(Pid1, {msg_suspend, Msg, Pid2, ?TIMEOUT}),
+    %%
+    %% Msg no await
+    %%
+    gen_nbs:cast(Pid1, {msg_no_await, Msg, Pid2, ?TIMEOUT}),
     wait_for_msg(Pid2, {msg, Msg, Pid1}),
+    timer:sleep(?TIMEOUT),
     wait_for_msg(Pid1, {fail, Pid2}),
+
+    %%
+    %% Multiple msgs
+    %%
+    gen_nbs:cast(Pid1, {msg_multiple, Msg, Pid2, ?TIMEOUT}),
+    wait_for_msg(Pid2, {msg, Msg, Pid1}),
+    wait_for_msg(Pid2, {msg, Msg, Pid1}),
+    wait_for_msg(Pid1, {ack, Pid2}),
+    wait_for_msg(Pid1, {ack, Pid2}),
+
+    %%
+    %% Msg await timeout
+    %%
+    gen_nbs:cast(Pid1, {msg_await_timeout, ?TIMEOUT}),
+    timer:sleep(?TIMEOUT),
+    wait_for_msg(Pid1, {info, timeout}),
 
     gen_nbs:stop(Pid1),
     gen_nbs:stop(Pid2),
@@ -416,9 +434,7 @@ test_msg(_Config) ->
 wait_for_msg(Pid, Msg) ->
     receive
         {Pid, Msg} ->
-            ok;
-        Else ->
-            ct:fail(Else)
+            ok
     after 5000 ->
               ct:fail(timeout)
     end.

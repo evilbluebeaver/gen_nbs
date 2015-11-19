@@ -39,6 +39,8 @@
 %%%
 %%%    ==> {ack, State}
 %%%        {ack, State, Timeout}
+%%%        {await, Await, State}
+%%%        {await, Await, State, Timeout}
 %%%        {ok, State}
 %%%        {ok, State, Timeout}
 %%%        {stop, Reason, State}
@@ -48,6 +50,8 @@
 %%%
 %%%    ==> {ack, State}
 %%%        {ack, State, Timeout}
+%%%        {await, Await, State}
+%%%        {await, Await, State, Timeout}
 %%%        {ok, State}
 %%%        {ok, State, Timeout}
 %%%        {stop, Reason, State}
@@ -57,6 +61,8 @@
 %%%
 %%%    ==> {ack, State}
 %%%        {ack, State, Timeout}
+%%%        {await, Await, State}
+%%%        {await, Await, State, Timeout}
 %%%        {ok, State}
 %%%        {ok, State, Timeout}
 %%%        {stop, Reason, State}
@@ -66,6 +72,8 @@
 %%%
 %%%    ==> {ack, State}
 %%%        {ack, State, Timeout}
+%%%        {await, Await, State}
+%%%        {await, Await, State, Timeout}
 %%%        {ok, State}
 %%%        {ok, State, Timeout}
 %%%        {stop, Reason, State}
@@ -102,6 +110,7 @@
          start_link/3, start_link/4,
          stop/1, stop/3,
          cast/2, msg/2, msg/3,
+         ack/1,
          enter_loop/3, enter_loop/4, enter_loop/5, wake_hib/1]).
 
 %% System exports
@@ -157,6 +166,13 @@
       Status :: term().
 
 -optional_callbacks([format_status/2]).
+
+-define(TAG(What, Ref), {What, Ref}).
+
+-define(ACK(Tag),       {'$gen_ack',    Tag}).
+-define(CAST(Msg),      {'$gen_cast',   Msg}).
+-define(MSG(Tag, Msg),  {'$gen_msg',   Tag, Msg}).
+-define(FAIL(Tag),      {'$gen_fail',   Tag}).
 
 
 %%%  -----------------------------------------------------------------
@@ -216,29 +232,30 @@ msg(Dest, Msg, Timeout) ->
     do_send(Dest, msg, Msg, Timeout).
 
 %% -----------------------------------------------------------------
+%% Acknowledgement
+%% -----------------------------------------------------------------
+
+ack(?TAG(From, Ref)) ->
+    From ! ?ACK(?TAG(self(), Ref)),
+    ok.
+
+%% -----------------------------------------------------------------
 %% Send functions
 %% -----------------------------------------------------------------
 %%
-
--define(TAG(What, Ref), {What, Ref}).
-
--define(ACK(Tag),                   {'$gen_ack',    Tag}).
--define(CAST(Msg),                  {'$gen_cast',   Msg}).
--define(MSG(Tag, Msg),             {'$gen_msg',   Tag, Msg}).
--define(FAIL(Tag),                  {'$gen_fail',   Tag}).
--define(NOTIFY(Tag, TimerRef),      {'$gen_notify', Tag, TimerRef}).
 
 do_send(Dest, cast, Msg) ->
     do_cmd_send(Dest, ?CAST(Msg)).
 
 do_send(Dest, msg, Msg, infinity) ->
     Ref = make_ref(),
-    do_cmd_send(Dest, ?MSG({self(), Ref}, Msg));
+    do_cmd_send(Dest, ?MSG({self(), Ref}, Msg)),
+    [];
 do_send(Dest, msg, Msg, Timeout) ->
     Ref = make_ref(),
     TimerRef = erlang:send_after(Timeout, self(), ?FAIL({Dest, Ref})),
-    self() ! ?NOTIFY({Dest, Ref}, TimerRef),
-    do_cmd_send(Dest, ?MSG({self(), Ref}, Msg)).
+    do_cmd_send(Dest, ?MSG({self(), Ref}, Msg)),
+    {{Dest, Ref}, TimerRef}.
 
 do_cmd_send({global, Name}, Cmd) ->
     catch global:send(Name, Cmd),
@@ -374,6 +391,7 @@ unregister_name(Pid) when is_pid(Pid) ->
 -define(OK_RET(State), {ok, State}).
 -define(TIMERS_RET(Timers), {timers, Timers}).
 -define(ACK_RET(Tag), {ack, Tag}).
+-define(AWAIT_RET(Await), {await, Await}).
 
 %%%========================================================================
 %%% Internal functions
@@ -433,12 +451,6 @@ try_dispatch(?CAST(Msg), Mod, State, _Timers) ->
     try_handle(Mod, handle_cast, [Msg, State]);
 try_dispatch(?MSG(Tag, Msg), Mod, State, _Timers) ->
     try_handle(Mod, handle_msg, [Msg, Tag, State]);
-try_dispatch(?NOTIFY(Tag, TimerRef), _Mod, State, Timers) ->
-    Reply = {ok, {ok, State}},
-    case erlang:read_timer(TimerRef) of
-        false ->  Reply;
-        _ -> {timers, [{Tag, TimerRef} | Timers], Reply}
-    end;
 try_dispatch(?FAIL(Tag), Mod, State, Timers) ->
     case lists:keytake(Tag, 1, Timers) of
         false ->
@@ -503,8 +515,18 @@ handle_msg(Msg, InnerState=#inner_state{mod=Mod, state=State, timers=Timers}) ->
     Reply = try_dispatch(Msg, Mod, State, Timers),
     handle_common_reply(Reply, Msg, InnerState).
 
-handle_common_reply(Reply, Msg, InnerState=#inner_state{}) ->
+handle_common_reply(Reply, Msg, InnerState=#inner_state{timers=Timers}) ->
     case Reply of
+        {ok, {await, Await, NState}} ->
+            NTimers = update_timers(Await, Timers),
+            NInnerState = debug(?AWAIT_RET(Await),
+                                InnerState#inner_state{state=NState, timers=NTimers}),
+            loop(NInnerState#inner_state{timeout=infinity});
+        {ok, {await, Await, NState, Time}} ->
+            NTimers = update_timers(Await, Timers),
+            NInnerState = debug(?AWAIT_RET(Await),
+                                InnerState#inner_state{state=NState, timers=NTimers}),
+            loop(NInnerState#inner_state{timeout=Time});
         {ok, {ack, ?TAG(From, Ref)=Tag, NState}} ->
             From ! ?ACK(?TAG(self(), Ref)),
             NInnerState = debug(?ACK_RET(Tag),
@@ -515,9 +537,9 @@ handle_common_reply(Reply, Msg, InnerState=#inner_state{}) ->
             NInnerState = debug(?ACK_RET(Tag),
                                 InnerState#inner_state{state=NState}),
             loop(NInnerState#inner_state{timeout=Time});
-        {timers, Timers, NReply} ->
-            NInnerState = debug(?TIMERS_RET(Timers),
-                                InnerState#inner_state{timers=Timers}),
+        {timers, NTimers, NReply} ->
+            NInnerState = debug(?TIMERS_RET(NTimers),
+                                InnerState#inner_state{timers=NTimers}),
             handle_common_reply(NReply, Msg, NInnerState);
         {ok, {ok, NState}} ->
             NInnerState = debug(?OK_RET(NState),
@@ -534,6 +556,14 @@ handle_common_reply(Reply, Msg, InnerState=#inner_state{}) ->
         {ok, BadReply} ->
             terminate({bad_return_value, BadReply}, Msg, InnerState)
     end.
+
+update_timers([], Timers) ->
+    Timers;
+update_timers(Await, Timers) when is_list(Await) ->
+    Await ++ Timers;
+update_timers(Await, Timers) ->
+    [Await | Timers].
+
 
 %%-----------------------------------------------------------------
 %% Callback functions for system messages handling.
@@ -585,9 +615,6 @@ print_event(Dev, ?ACK(Msg), Name) ->
 print_event(Dev, ?FAIL(Tag), Name) ->
     io:format(Dev, "*DBG* ~p message to ~p timed out~n",
               [Name, Tag]);
-print_event(Dev, ?NOTIFY(Tag, _TimerRef), Name) ->
-    io:format(Dev, "*DBG* ~p started timer on message to ~p ~n",
-              [Name, Tag]);
 print_event(Dev, ?MSG(Tag, Msg), Name) ->
     io:format(Dev, "*DBG* ~p got msg ~p from ~p~n",
               [Name, Msg, Tag]);
@@ -597,6 +624,8 @@ print_event(Dev, ?TIMERS_RET(Timers), Name) ->
     io:format(Dev, "*DBG* ~p new timers ~p~n", [Name, Timers]);
 print_event(Dev, ?ACK_RET(Tag), Name) ->
     io:format(Dev, "*DBG* ~p sent acknowledgement to ~p~n", [Name, Tag]);
+print_event(Dev, ?AWAIT_RET(Await), Name) ->
+    io:format(Dev, "*DBG* ~p  await for ~p~n", [Name, Await]);
 print_event(Dev, Msg, Name) ->
     io:format(Dev, "*DBG* ~p got ~p~n", [Name, Msg]).
 

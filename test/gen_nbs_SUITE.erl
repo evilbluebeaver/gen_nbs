@@ -387,7 +387,10 @@ test_send(_Config) ->
 test_msg(_Config) ->
     {ok, Pid1} = gen_nbs:start_link(?TEST_MODULE, {notify, self()}, [{debug, [trace]}]),
     {ok, Pid2} = gen_nbs:start_link(?TEST_MODULE, {notify, self()}, [{debug, [trace]}]),
+    {ok, Pid3} = gen_nbs:start_link({local, test_local_name}, ?TEST_MODULE, {notify, self()}, [{debug, [trace]}]),
+    {ok, Pid4} = gen_nbs:start_link({global, test_global_name}, ?TEST_MODULE, {notify, self()}, [{debug, [trace]}]),
     Msg = message,
+
     %%
     %% No ack
     %%
@@ -459,10 +462,38 @@ test_msg(_Config) ->
     wait_for_msg(Pid1, {ack, Pid2}),
     wait_for_msg(Pid1, {ack, Pid2}),
 
+    %%
+    %% Post with no ack needed (unexisting_process)
+    %%
+    gen_nbs:cast(Pid1, {msg_no_ack, Msg, fake_name, infinity}),
+    wait_for_msg(Pid1, {fail, {fake_name, node()}}),
+
+    %%
+    %% Post (globally registered process)
+    %%
+    gen_nbs:cast(Pid1, {msg_no_ack, Msg, {global, test_global_name}, infinity}),
+    wait_for_msg(Pid4, {msg, Msg, Pid1}),
+
+    %%
+    %% Post ("via mod" registered process)
+    %%
+    gen_nbs:cast(Pid1, {msg_no_ack, Msg, {via, global, test_global_name}, infinity}),
+    wait_for_msg(Pid4, {msg, Msg, Pid1}),
+
+    %%
+    %% Post (fully qualified name)
+    %%
+    gen_nbs:cast(Pid1, {msg_no_ack, Msg, {test_local_name, node()}, infinity}),
+    wait_for_msg(Pid3, {msg, Msg, Pid1}),
+
     gen_nbs:stop(Pid1),
     gen_nbs:stop(Pid2),
+    gen_nbs:stop(Pid3),
+    gen_nbs:stop(Pid4),
     wait_for_exit(Pid1),
     wait_for_exit(Pid2),
+    wait_for_exit(Pid3),
+    wait_for_exit(Pid4),
     ok.
 
 wait_for_msg(Pid, Msg) ->

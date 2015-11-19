@@ -239,23 +239,15 @@ do_send(Dest, msg, Msg, Timeout) ->
     do_cmd_send(SName, ?MSG({self(), Ref}, Msg)),
     {Tag, TimerRef}.
 
-monitor_suitable_name(Dest) ->
-    case where(Dest) of
-        undefined ->
-            exit(noproc);
-        Name ->
-            Name
-    end.
-
-where(Pid) when is_pid(Pid) ->
+monitor_suitable_name(Pid) when is_pid(Pid) ->
     Pid;
-where(Name) when is_atom(Name) ->
+monitor_suitable_name(Name) when is_atom(Name) ->
     {Name, node()};
-where({global, Name}) ->
+monitor_suitable_name({global, Name}) ->
     global:whereis_name(Name);
-where({via, Mod, Name}) ->
+monitor_suitable_name({via, Mod, Name}) ->
     Mod:whereis_name(Name);
-where({Dest, Node}=FullName) when is_atom(Dest), is_atom(Node) ->
+monitor_suitable_name({Dest, Node}=FullName) when is_atom(Dest), is_atom(Node) ->
     FullName.
 
 attach_monitor(Dest) ->

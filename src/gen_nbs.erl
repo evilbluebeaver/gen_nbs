@@ -285,7 +285,7 @@ do_cmd_default_send(Dest, Cmd) ->
                       mod,
                       timeout,
                       debug,
-                      timers=[]}).
+                      timers=#{}}).
 
 %%-----------------------------------------------------------------
 %% enter_loop(Mod, Options, State, <ServerName>, <TimeOut>) ->_
@@ -452,18 +452,20 @@ try_dispatch(?CAST(Msg), Mod, State, _Timers) ->
 try_dispatch(?MSG(Tag, Msg), Mod, State, _Timers) ->
     try_handle(Mod, handle_msg, [Msg, Tag, State]);
 try_dispatch(?FAIL(Tag), Mod, State, Timers) ->
-    case lists:keytake(Tag, 1, Timers) of
-        false ->
+    case maps:find(Tag, Timers) of
+        error ->
             try_handle(Mod, handle_fail, [Tag, State]);
-        {value, {Tag, Timer}, NTimers} ->
+        {ok, Timer} ->
+            NTimers = maps:remove(Tag, Timers),
             erlang:cancel_timer(Timer),
             try_handle(Mod, handle_fail, [Tag, State], NTimers)
     end;
 try_dispatch(?ACK(Tag), Mod, State, Timers) ->
-    case lists:keytake(Tag, 1, Timers) of
-        false ->
+    case maps:find(Tag, Timers) of
+        error ->
             {ok, {ok, State}};
-        {value, {Tag, Timer}, NTimers} ->
+        {ok, Timer} ->
+            NTimers = maps:remove(Tag, Timers),
             erlang:cancel_timer(Timer),
             try_handle(Mod, handle_ack, [Tag, State], NTimers)
     end;
@@ -560,9 +562,9 @@ handle_common_reply(Reply, Msg, InnerState=#inner_state{timers=Timers}) ->
 update_timers([], Timers) ->
     Timers;
 update_timers(Await, Timers) when is_list(Await) ->
-    Await ++ Timers;
-update_timers(Await, Timers) ->
-    [Await | Timers].
+    lists:foldl(fun({Tag, Timer}, Acc) -> maps:put(Tag, Timer, Acc) end, Timers, Await);
+update_timers({Tag, Timer}, Timers) ->
+    maps:put(Tag, Timer, Timers).
 
 
 %%-----------------------------------------------------------------

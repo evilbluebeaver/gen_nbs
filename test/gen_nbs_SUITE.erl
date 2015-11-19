@@ -24,17 +24,18 @@
          test_cast/1,
          test_info/1,
          test_msg/1,
+         test_send/1,
          test_misc/1,
          test_error/1]).
 
 -define(TIMEOUT, 100).
--define(TEST_MODULE, test_gen_nbs).
+-define(TEST_MODULE, test_nbs).
 
 %%
 %% CT functions
 %%
 groups() ->
-    [{messages, [], [test_cast, test_info, test_msg, test_misc, test_error]},
+    [{messages, [], [test_cast, test_info, test_msg, test_misc, test_error, test_send]},
      {enter_loop, [], [test_enter_loop, test_enter_loop_local, test_enter_loop_global, test_enter_loop_via]}].
 
 all() ->
@@ -358,6 +359,31 @@ test_info(_Config) ->
     wait_for_exit(Pid),
     ok.
 
+test_send(_Config) ->
+    {ok, Pid1} = gen_nbs:start_link({global, test_name}, ?TEST_MODULE, {notify, self()}, []),
+    gen_nbs:cast({global, test_name}, message),
+    wait_for_msg(Pid1, {cast, message}),
+    gen_nbs:stop(Pid1),
+    wait_for_exit(Pid1),
+    undefined = global:whereis_name(test_name),
+
+    {ok, Pid2} = gen_nbs:start_link({via, global, test_name}, ?TEST_MODULE, {notify, self()}, []),
+    gen_nbs:cast({via, global, test_name}, message),
+    wait_for_msg(Pid2, {cast, message}),
+    gen_nbs:stop(Pid2),
+    wait_for_exit(Pid2),
+    undefined = global:whereis_name(test_name),
+
+    {ok, Pid3} = gen_nbs:start_link({local, test_name}, ?TEST_MODULE, {notify, self()}, []),
+    gen_nbs:cast(test_name, message),
+    wait_for_msg(Pid3, {cast, message}),
+    gen_nbs:stop(Pid3),
+    wait_for_exit(Pid3),
+    undefined = erlang:whereis(test_name),
+
+    %% Fake node send
+    gen_nbs:cast({test_name, fake_node}, message).
+
 test_msg(_Config) ->
     {ok, Pid1} = gen_nbs:start_link(?TEST_MODULE, {notify, self()}, [{debug, [trace]}]),
     {ok, Pid2} = gen_nbs:start_link(?TEST_MODULE, {notify, self()}, [{debug, [trace]}]),
@@ -410,15 +436,6 @@ test_msg(_Config) ->
     wait_for_msg(Pid1, {fail, Pid2}),
 
     %%
-    %% Multiple msgs
-    %%
-    gen_nbs:cast(Pid1, {msg_multiple, Msg, Pid2, ?TIMEOUT}),
-    wait_for_msg(Pid2, {msg, Msg, Pid1}),
-    wait_for_msg(Pid2, {msg, Msg, Pid1}),
-    wait_for_msg(Pid1, {ack, Pid2}),
-    wait_for_msg(Pid1, {ack, Pid2}),
-
-    %%
     %% Msg await timeout
     %%
     gen_nbs:cast(Pid1, {msg_await_timeout, ?TIMEOUT}),
@@ -431,6 +448,15 @@ test_msg(_Config) ->
     gen_nbs:cast(Pid1, {msg_manual_ack, Msg, Pid2}),
     wait_for_msg(Pid2, {msg, Msg, Pid1}),
     timer:sleep(?TIMEOUT),
+    wait_for_msg(Pid1, {ack, Pid2}),
+
+    %%
+    %% Multiple msgs
+    %%
+    gen_nbs:cast(Pid1, {msg_multiple, Msg, Pid2, ?TIMEOUT}),
+    wait_for_msg(Pid2, {msg, Msg, Pid1}),
+    wait_for_msg(Pid2, {msg, Msg, Pid1}),
+    wait_for_msg(Pid1, {ack, Pid2}),
     wait_for_msg(Pid1, {ack, Pid2}),
 
     gen_nbs:stop(Pid1),

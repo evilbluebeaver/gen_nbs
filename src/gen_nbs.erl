@@ -35,7 +35,7 @@
 %%%         ignore
 %%%         {stop, Reason}
 %%%
-%%%   handle_msg(Msg, {From, Tag}, State)
+%%%   handle_msg(Msg, {From, Tag}, State) Handles incoming messages
 %%%
 %%%    ==> {ack, State}
 %%%        {ack, State, Timeout}
@@ -46,7 +46,7 @@
 %%%        {stop, Reason, State}
 %%%              Reason = normal | shutdown | Term terminate(State) is called
 %%%
-%%%   handle_fail({From, Tag}, State)
+%%%   handle_fail({From, Tag}, State) handles fail of outgoing message
 %%%
 %%%    ==> {ack, State}
 %%%        {ack, State, Timeout}
@@ -57,7 +57,7 @@
 %%%        {stop, Reason, State}
 %%%              Reason = normal | shutdown | Term terminate(State) is called
 %%%
-%%%   handle_ack({From, Tag}, State)
+%%%   handle_ack({From, Tag}, State) handles successful acknowledgement of outgoing message
 %%%
 %%%    ==> {ack, State}
 %%%        {ack, State, Timeout}
@@ -84,26 +84,6 @@
 %%%
 %%%    ==> ok
 %%%
-%%%
-%%% TODO The work flow (of the server) can be described as follows:
-%%%
-%%%   User module                          Generic
-%%%   -----------                          -------
-%%%     start            ----->             start
-%%%     init             <-----              .
-%%%
-%%%                                         loop
-%%%
-%%%     handle_cast      <-----              .
-%%%
-%%%     handle_info      <-----              .
-%%%
-%%%     terminate        <-----              .
-%%%
-%%%                      ----->             reply
-%%%
-%%%
-%%% ---------------------------------------------------
 
 %% API
 -export([start/3, start/4,
@@ -248,14 +228,30 @@ do_send(Dest, cast, Msg) ->
     do_cmd_send(Dest, ?CAST(Msg)).
 
 do_send(Dest, msg, Msg, infinity) ->
-    Ref = make_ref(),
-    do_cmd_send(Dest, ?MSG({self(), Ref}, Msg)),
+    SName = monitor_suitable_name(Dest),
+    {_, Ref} = attach_monitor(SName),
+    do_cmd_send(SName, ?MSG({self(), Ref}, Msg)),
     [];
 do_send(Dest, msg, Msg, Timeout) ->
-    Ref = make_ref(),
-    TimerRef = erlang:send_after(Timeout, self(), ?FAIL({Dest, Ref})),
-    do_cmd_send(Dest, ?MSG({self(), Ref}, Msg)),
-    {{Dest, Ref}, TimerRef}.
+    SName = monitor_suitable_name(Dest),
+    Tag = {_, Ref} = attach_monitor(SName),
+    TimerRef = erlang:send_after(Timeout, self(), ?FAIL(Tag)),
+    do_cmd_send(SName, ?MSG({self(), Ref}, Msg)),
+    {Tag, TimerRef}.
+
+monitor_suitable_name(Pid) when is_pid(Pid) ->
+    Pid;
+monitor_suitable_name(Name) when is_atom(Name) ->
+    {Name, node()};
+monitor_suitable_name({global, Name}) ->
+    global:whereis_name(Name);
+monitor_suitable_name({via, Mod, Name}) ->
+    Mod:whereis_name(Name);
+monitor_suitable_name({Dest, Node}=FullName) when is_atom(Dest), is_atom(Node) ->
+    FullName.
+
+attach_monitor(Dest) ->
+    ?TAG(Dest, monitor(process, Dest)).
 
 do_cmd_send({global, Name}, Cmd) ->
     catch global:send(Name, Cmd),
@@ -447,11 +443,14 @@ decode_msg(Msg, InnerState=#inner_state{parent=Parent,
 %% report.
 %% ---------------------------------------------------
 
+try_dispatch({'DOWN', Ref, process, Pid, _Info}, Mod, State, Timers) ->
+    try_dispatch(?FAIL(?TAG(Pid, Ref)), Mod, State, Timers);
 try_dispatch(?CAST(Msg), Mod, State, _Timers) ->
     try_handle(Mod, handle_cast, [Msg, State]);
 try_dispatch(?MSG(Tag, Msg), Mod, State, _Timers) ->
     try_handle(Mod, handle_msg, [Msg, Tag, State]);
-try_dispatch(?FAIL(Tag), Mod, State, Timers) ->
+try_dispatch(?FAIL(Tag=?TAG(_From, Ref)), Mod, State, Timers) ->
+    true = demonitor(Ref),
     case maps:find(Tag, Timers) of
         error ->
             try_handle(Mod, handle_fail, [Tag, State]);
@@ -460,7 +459,8 @@ try_dispatch(?FAIL(Tag), Mod, State, Timers) ->
             erlang:cancel_timer(Timer),
             try_handle(Mod, handle_fail, [Tag, State], NTimers)
     end;
-try_dispatch(?ACK(Tag), Mod, State, Timers) ->
+try_dispatch(?ACK(Tag=?TAG(_From, Ref)), Mod, State, Timers) ->
+    true = demonitor(Ref),
     case maps:find(Tag, Timers) of
         error ->
             {ok, {ok, State}};

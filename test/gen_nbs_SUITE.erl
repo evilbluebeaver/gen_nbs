@@ -29,7 +29,7 @@
          test_error/1]).
 
 -define(TIMEOUT, 100).
--define(TEST_MODULE, test_gen_nbs).
+-define(TEST_MODULE, test_nbs).
 
 %%
 %% CT functions

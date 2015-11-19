@@ -1,4 +1,4 @@
--module(test_gen_nbs).
+-module(test_nbs).
 
 %%
 %% Gen_nbs exports

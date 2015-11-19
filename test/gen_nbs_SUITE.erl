@@ -73,7 +73,7 @@ end_per_testcase(Test, Config) ->
         true ->
             receive
                 Else -> {fail, [Test, Else]}
-            after 0 ->
+            after ?TIMEOUT ->
                       ok
             end
     end.

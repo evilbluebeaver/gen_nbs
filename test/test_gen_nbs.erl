@@ -5,7 +5,7 @@
 %%
 -export([init/1,
          handle_cast/2,
-         handle_post/3,
+         handle_msg/3,
          handle_info/2,
          handle_ack/2,
          handle_fail/2,
@@ -58,38 +58,38 @@ handle_cast({timeout, Timeout}, State) ->
     {ok, State, Timeout};
 handle_cast(stop, State) ->
     {stop, normal, State};
-handle_cast({post_no_ack, Msg, To, Timeout}, State) ->
-    gen_nbs:post(To, Msg, Timeout),
+handle_cast({msg_no_ack, Msg, To, Timeout}, State) ->
+    gen_nbs:msg(To, Msg, Timeout),
     {ok, State};
-handle_cast({post_ack, Msg, To}, State) ->
-    gen_nbs:post(To, {ack, Msg}),
+handle_cast({msg_ack, Msg, To}, State) ->
+    gen_nbs:msg(To, {ack, Msg}),
     {ok, State};
-handle_cast({post_suspend, Msg, To, Timeout}, State) ->
-    gen_nbs:post(To, {ack, Msg}, 0),
+handle_cast({msg_suspend, Msg, To, Timeout}, State) ->
+    gen_nbs:msg(To, {ack, Msg}, 0),
     timer:sleep(Timeout * 2),
     {ok, State};
-handle_cast({post_long_ack, Msg, To, Timeout}, State) ->
-    gen_nbs:post(To, {long_ack, Timeout, Msg}, Timeout),
+handle_cast({msg_long_ack, Msg, To, Timeout}, State) ->
+    gen_nbs:msg(To, {long_ack, Timeout, Msg}, Timeout),
     {ok, State};
-handle_cast({post_ack_timeout, Msg, To, Timeout}, State) ->
-    gen_nbs:post(To, {timeout, Timeout, Msg}, Timeout),
+handle_cast({msg_ack_timeout, Msg, To, Timeout}, State) ->
+    gen_nbs:msg(To, {timeout, Timeout, Msg}, Timeout),
     {ok, State};
 handle_cast(Msg, State={notify, Pid}) ->
     Pid ! {self(), {cast, Msg}},
     {ok, State}.
 
-handle_post({long_ack, Timeout, Msg}, F={From, _}, State={notify, Pid}) ->
+handle_msg({long_ack, Timeout, Msg}, F={From, _}, State={notify, Pid}) ->
     timer:sleep(Timeout),
-    Pid ! {self(), {post, Msg, From}},
+    Pid ! {self(), {msg, Msg, From}},
     {ack, F, State};
-handle_post({timeout, Timeout, Msg}, F={From, _}, State={notify, Pid}) ->
-    Pid ! {self(), {post, Msg, From}},
+handle_msg({timeout, Timeout, Msg}, F={From, _}, State={notify, Pid}) ->
+    Pid ! {self(), {msg, Msg, From}},
     {ack, F, State, Timeout};
-handle_post({ack, Msg}, F={From, _}, State={notify, Pid}) ->
-    Pid ! {self(), {post, Msg, From}},
+handle_msg({ack, Msg}, F={From, _}, State={notify, Pid}) ->
+    Pid ! {self(), {msg, Msg, From}},
     {ack, F, State};
-handle_post(Msg, {From, _}, State={notify, Pid}) ->
-    Pid ! {self(), {post, Msg, From}},
+handle_msg(Msg, {From, _}, State={notify, Pid}) ->
+    Pid ! {self(), {msg, Msg, From}},
     {ok, State}.
 
 handle_ack({From, _}, State={notify, Pid}) ->

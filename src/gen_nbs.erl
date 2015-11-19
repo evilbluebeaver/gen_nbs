@@ -35,7 +35,7 @@
 %%%         ignore
 %%%         {stop, Reason}
 %%%
-%%%   handle_post(Msg, {From, Tag}, State)
+%%%   handle_msg(Msg, {From, Tag}, State)
 %%%
 %%%    ==> {ack, State}
 %%%        {ack, State, Timeout}
@@ -101,7 +101,7 @@
 -export([start/3, start/4,
          start_link/3, start_link/4,
          stop/1, stop/3,
-         cast/2, post/2, post/3,
+         cast/2, msg/2, msg/3,
          enter_loop/3, enter_loop/4, enter_loop/5, wake_hib/1]).
 
 %% System exports
@@ -122,7 +122,7 @@
 -callback init(Args :: term()) ->
     {ok, State :: term()} | {ok, State :: term(), timeout() | hibernate} |
     {stop, Reason :: term()} | ignore.
--callback handle_post(Message :: term(), From :: {pid(), reference()},
+-callback handle_msg(Message :: term(), From :: {pid(), reference()},
                       State :: term()) ->
     {ack, To :: {pid(), reference()}, NewState :: term()} |
     {ack, To :: {pid(), reference()}, NewState :: term(), timeout() | hibernate} |
@@ -210,10 +210,10 @@ cast(Dest, Msg) ->
 %% Post a message to a generic server.
 %% -----------------------------------------------------------------
 
-post(Dest, Msg) ->
-    post(Dest, Msg, 5000).
-post(Dest, Msg, Timeout) ->
-    do_send(Dest, post, Msg, Timeout).
+msg(Dest, Msg) ->
+    msg(Dest, Msg, 5000).
+msg(Dest, Msg, Timeout) ->
+    do_send(Dest, msg, Msg, Timeout).
 
 %% -----------------------------------------------------------------
 %% Send functions
@@ -224,21 +224,21 @@ post(Dest, Msg, Timeout) ->
 
 -define(ACK(Tag),                   {'$gen_ack',    Tag}).
 -define(CAST(Msg),                  {'$gen_cast',   Msg}).
--define(POST(Tag, Msg),             {'$gen_post',   Tag, Msg}).
+-define(MSG(Tag, Msg),             {'$gen_msg',   Tag, Msg}).
 -define(FAIL(Tag),                  {'$gen_fail',   Tag}).
 -define(NOTIFY(Tag, TimerRef),      {'$gen_notify', Tag, TimerRef}).
 
 do_send(Dest, cast, Msg) ->
     do_cmd_send(Dest, ?CAST(Msg)).
 
-do_send(Dest, post, Msg, infinity) ->
+do_send(Dest, msg, Msg, infinity) ->
     Ref = make_ref(),
-    do_cmd_send(Dest, ?POST({self(), Ref}, Msg));
-do_send(Dest, post, Msg, Timeout) ->
+    do_cmd_send(Dest, ?MSG({self(), Ref}, Msg));
+do_send(Dest, msg, Msg, Timeout) ->
     Ref = make_ref(),
     TimerRef = erlang:send_after(Timeout, self(), ?FAIL({Dest, Ref})),
     self() ! ?NOTIFY({Dest, Ref}, TimerRef),
-    do_cmd_send(Dest, ?POST({self(), Ref}, Msg)).
+    do_cmd_send(Dest, ?MSG({self(), Ref}, Msg)).
 
 do_cmd_send({global, Name}, Cmd) ->
     catch global:send(Name, Cmd),
@@ -431,8 +431,8 @@ decode_msg(Msg, InnerState=#inner_state{parent=Parent,
 
 try_dispatch(?CAST(Msg), Mod, State, _Timers) ->
     try_handle(Mod, handle_cast, [Msg, State]);
-try_dispatch(?POST(Tag, Msg), Mod, State, _Timers) ->
-    try_handle(Mod, handle_post, [Msg, Tag, State]);
+try_dispatch(?MSG(Tag, Msg), Mod, State, _Timers) ->
+    try_handle(Mod, handle_msg, [Msg, Tag, State]);
 try_dispatch(?NOTIFY(Tag, TimerRef), _Mod, State, Timers) ->
     Reply = {ok, {ok, State}},
     case erlang:read_timer(TimerRef) of
@@ -588,8 +588,8 @@ print_event(Dev, ?FAIL(Tag), Name) ->
 print_event(Dev, ?NOTIFY(Tag, _TimerRef), Name) ->
     io:format(Dev, "*DBG* ~p started timer on message to ~p ~n",
               [Name, Tag]);
-print_event(Dev, ?POST(Tag, Msg), Name) ->
-    io:format(Dev, "*DBG* ~p got post ~p from ~p~n",
+print_event(Dev, ?MSG(Tag, Msg), Name) ->
+    io:format(Dev, "*DBG* ~p got msg ~p from ~p~n",
               [Name, Msg, Tag]);
 print_event(Dev, ?OK_RET(State), Name) ->
     io:format(Dev, "*DBG* ~p new state ~p~n", [Name, State]);

@@ -23,7 +23,7 @@
          test_sys/1,
          test_cast/1,
          test_info/1,
-         test_post/1,
+         test_msg/1,
          test_misc/1,
          test_error/1]).
 
@@ -34,7 +34,7 @@
 %% CT functions
 %%
 groups() ->
-    [{messages, [], [test_cast, test_info, test_post, test_misc, test_error]},
+    [{messages, [], [test_cast, test_info, test_msg, test_misc, test_error]},
      {enter_loop, [], [test_enter_loop, test_enter_loop_local, test_enter_loop_global, test_enter_loop_via]}].
 
 all() ->
@@ -358,44 +358,44 @@ test_info(_Config) ->
     wait_for_exit(Pid),
     ok.
 
-test_post(_Config) ->
+test_msg(_Config) ->
     {ok, Pid1} = gen_nbs:start_link(?TEST_MODULE, {notify, self()}, [{debug, [trace]}]),
     {ok, Pid2} = gen_nbs:start_link(?TEST_MODULE, {notify, self()}, [{debug, [trace]}]),
     Msg = message,
     %%
     %% No ack
     %%
-    gen_nbs:cast(Pid1, {post_no_ack, Msg, Pid2, ?TIMEOUT}),
-    wait_for_msg(Pid2, {post, Msg, Pid1}),
+    gen_nbs:cast(Pid1, {msg_no_ack, Msg, Pid2, ?TIMEOUT}),
+    wait_for_msg(Pid2, {msg, Msg, Pid1}),
     timer:sleep(?TIMEOUT),
     wait_for_msg(Pid1, {fail, Pid2}),
 
     %%
     %% Post with no ack needed
     %%
-    gen_nbs:cast(Pid1, {post_no_ack, Msg, Pid2, infinity}),
-    wait_for_msg(Pid2, {post, Msg, Pid1}),
+    gen_nbs:cast(Pid1, {msg_no_ack, Msg, Pid2, infinity}),
+    wait_for_msg(Pid2, {msg, Msg, Pid1}),
 
     %%
     %% Successful ack
     %%
-    gen_nbs:cast(Pid1, {post_ack, Msg, Pid2}),
-    wait_for_msg(Pid2, {post, Msg, Pid1}),
+    gen_nbs:cast(Pid1, {msg_ack, Msg, Pid2}),
+    wait_for_msg(Pid2, {msg, Msg, Pid1}),
     timer:sleep(?TIMEOUT),
     wait_for_msg(Pid1, {ack, Pid2}),
 
     %%
     %% Long ack
     %%
-    gen_nbs:cast(Pid1, {post_long_ack, Msg, Pid2, ?TIMEOUT}),
-    wait_for_msg(Pid2, {post, Msg, Pid1}),
+    gen_nbs:cast(Pid1, {msg_long_ack, Msg, Pid2, ?TIMEOUT}),
+    wait_for_msg(Pid2, {msg, Msg, Pid1}),
     timer:sleep(?TIMEOUT),
     wait_for_msg(Pid1, {fail, Pid2}),
     %%
     %% Ack with timeout after it
     %%
-    gen_nbs:cast(Pid1, {post_ack_timeout, Msg, Pid2, ?TIMEOUT}),
-    wait_for_msg(Pid2, {post, Msg, Pid1}),
+    gen_nbs:cast(Pid1, {msg_ack_timeout, Msg, Pid2, ?TIMEOUT}),
+    wait_for_msg(Pid2, {msg, Msg, Pid1}),
     wait_for_msg(Pid1, {ack, Pid2}),
     timer:sleep(?TIMEOUT),
     wait_for_msg(Pid2, {info, timeout}),
@@ -403,8 +403,8 @@ test_post(_Config) ->
     %%%
     %%% Notify after timeout
     %%%
-    gen_nbs:cast(Pid1, {post_suspend, Msg, Pid2, ?TIMEOUT}),
-    wait_for_msg(Pid2, {post, Msg, Pid1}),
+    gen_nbs:cast(Pid1, {msg_suspend, Msg, Pid2, ?TIMEOUT}),
+    wait_for_msg(Pid2, {msg, Msg, Pid1}),
     wait_for_msg(Pid1, {fail, Pid2}),
 
     gen_nbs:stop(Pid1),

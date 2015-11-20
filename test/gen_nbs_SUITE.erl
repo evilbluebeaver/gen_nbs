@@ -26,10 +26,12 @@
          test_msg/1,
          test_send/1,
          test_misc/1,
+         test_format_status/1,
          test_error/1]).
 
 -define(TIMEOUT, 100).
 -define(TEST_MODULE, test_nbs).
+-define(TEST_FORMAT_MODULE, test_nbs_format).
 
 %%
 %% CT functions
@@ -42,6 +44,7 @@ all() ->
     [test_start,
      {group, enter_loop},
      {group, messages},
+     test_format_status,
      test_sys].
 
 init_per_suite(Config) ->
@@ -495,6 +498,35 @@ test_msg(_Config) ->
     wait_for_exit(Pid3),
     wait_for_exit(Pid4),
     ok.
+
+test_format_status(_Config) ->
+    ListFun = fun() ->
+                      [some_state_info]
+              end,
+    SimpleFun = fun() ->
+                        some_state_info
+                end,
+    ErrorFun =  fun() ->
+                        error(some_error)
+                end,
+    {ok, Pid1} = gen_nbs:start_link(?TEST_FORMAT_MODULE, {format_status, ListFun}, []),
+    {ok, Pid2} = gen_nbs:start_link(?TEST_FORMAT_MODULE, {format_status, SimpleFun}, []),
+    {ok, Pid3} = gen_nbs:start_link(?TEST_FORMAT_MODULE, {format_status, ErrorFun}, []),
+    {ok, Pid4} = gen_nbs:start_link(?TEST_MODULE, [], []),
+
+    _ = sys:get_status(Pid1),
+    _ = sys:get_status(Pid2),
+    _ = sys:get_status(Pid3),
+    _ = sys:get_status(Pid4),
+
+    gen_nbs:stop(Pid1),
+    gen_nbs:stop(Pid2),
+    gen_nbs:stop(Pid3),
+    gen_nbs:stop(Pid4),
+    wait_for_exit(Pid1),
+    wait_for_exit(Pid2),
+    wait_for_exit(Pid3),
+    wait_for_exit(Pid4).
 
 wait_for_msg(Pid, Msg) ->
     receive

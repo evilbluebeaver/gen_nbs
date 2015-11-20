@@ -22,6 +22,7 @@
          test_enter_loop_via/1,
          test_sys/1,
          test_cast/1,
+         test_abcast/1,
          test_info/1,
          test_msg/1,
          test_send/1,
@@ -37,7 +38,7 @@
 %% CT functions
 %%
 groups() ->
-    [{messages, [], [test_cast, test_info, test_msg, test_misc, test_error, test_send]},
+    [{messages, [], [test_cast, test_info, test_msg, test_misc, test_error, test_send, test_abcast]},
      {enter_loop, [], [test_enter_loop, test_enter_loop_local, test_enter_loop_global, test_enter_loop_via]}].
 
 all() ->
@@ -308,6 +309,16 @@ test_sys(_Config) ->
 test_cast(_Config) ->
     {ok, Pid} = gen_nbs:start_link(?TEST_MODULE, {notify, self()}, []),
     gen_nbs:cast(Pid, message),
+    wait_for_msg(Pid, {cast, message}),
+    gen_nbs:stop(Pid),
+    wait_for_exit(Pid),
+    ok.
+
+test_abcast(_Config) ->
+    {ok, Pid} = gen_nbs:start_link({local, test_name}, ?TEST_MODULE, {notify, self()}, []),
+    gen_nbs:abcast(test_name, message),
+    wait_for_msg(Pid, {cast, message}),
+    gen_nbs:abcast([node()], test_name, message),
     wait_for_msg(Pid, {cast, message}),
     gen_nbs:stop(Pid),
     wait_for_exit(Pid),

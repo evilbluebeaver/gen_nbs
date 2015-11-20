@@ -88,6 +88,7 @@
 %% API
 -export([start/3, start/4,
          start_link/3, start_link/4,
+         abcast/2, abcast/3,
          stop/1, stop/3,
          cast/2, msg/2, msg/3,
          ack/1,
@@ -218,6 +219,19 @@ msg(Dest, Msg, Timeout) ->
 ack(?TAG(From, Ref)) ->
     From ! ?ACK(?TAG(self(), Ref)),
     ok.
+
+%% -----------------------------------------------------------------
+%% Asynchronous broadcast, returns nothing, it's just send 'n' pray
+%%------------------------------------------------------------------
+abcast(Name, Msg) when is_atom(Name) ->
+    do_abcast([node() | nodes()], Name, Msg).
+abcast(Nodes, Name, Msg) when is_list(Nodes), is_atom(Name) ->
+    do_abcast(Nodes, Name, Msg).
+
+do_abcast([Node|Nodes], Name, Msg) when is_atom(Node) ->
+    do_send({Name,Node}, cast, Msg),
+    do_abcast(Nodes, Name, Msg);
+do_abcast([], _,_) -> abcast.
 
 %% -----------------------------------------------------------------
 %% Send functions

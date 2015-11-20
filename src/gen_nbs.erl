@@ -89,6 +89,7 @@
 -export([start/3, start/4,
          start_link/3, start_link/4,
          abcast/2, abcast/3,
+         multimsg/2, multimsg/3, multimsg/4,
          stop/1, stop/3,
          cast/2, msg/2, msg/3,
          ack/1,
@@ -224,14 +225,29 @@ ack(?TAG(From, Ref)) ->
 %% Asynchronous broadcast, returns nothing, it's just send 'n' pray
 %%------------------------------------------------------------------
 abcast(Name, Msg) when is_atom(Name) ->
-    do_abcast([node() | nodes()], Name, Msg).
+    do_multimsg([node() | nodes()], Name, cast, Msg).
 abcast(Nodes, Name, Msg) when is_list(Nodes), is_atom(Name) ->
-    do_abcast(Nodes, Name, Msg).
+    do_multimsg(Nodes, Name, cast, Msg).
 
-do_abcast([Node|Nodes], Name, Msg) when is_atom(Node) ->
-    do_send({Name,Node}, cast, Msg),
-    do_abcast(Nodes, Name, Msg);
-do_abcast([], _,_) -> abcast.
+
+multimsg(Name, Msg) when is_atom(Name) ->
+    do_multimsg([node() | nodes()], Name, msg, Msg).
+multimsg(Name, Msg, Timeout) when is_atom(Name) ->
+    do_multimsg([node() | nodes()], Name, msg, Msg, Timeout);
+multimsg(Nodes, Name, Msg) when is_list(Nodes), is_atom(Name) ->
+    do_multimsg(Nodes, Name, msg, Msg).
+multimsg(Nodes, Name, Msg, Timeout) when is_list(Nodes), is_atom(Name) ->
+    do_multimsg(Nodes, Name, msg, Msg, Timeout).
+
+do_multimsg(Nodes, Name, Type, Msg) ->
+    do_multimsg(Nodes, Name, Type, Msg, 5000).
+do_multimsg(Nodes, Name, Type, Msg, Timeout) ->
+    do_multimsg(Nodes, Name, Type, Msg, Timeout, []).
+do_multimsg([Node|Nodes], Name, Type, Msg, Timeout, Result) when is_atom(Node) ->
+    R = do_send({Name,Node}, Type, Msg, Timeout),
+    do_multimsg(Nodes, Name, Type, Msg, Timeout, [R | Result]);
+do_multimsg([], _, cast, _, _, _) -> abcast;
+do_multimsg([], _, msg, _, _, Result) -> Result.
 
 %% -----------------------------------------------------------------
 %% Send functions
@@ -241,6 +257,8 @@ do_abcast([], _,_) -> abcast.
 do_send(Dest, cast, Msg) ->
     do_cmd_send(Dest, ?CAST(Msg)).
 
+do_send(Dest, cast, Msg, _) ->
+    do_cmd_send(Dest, ?CAST(Msg));
 do_send(Dest, msg, Msg, infinity) ->
     SName = monitor_suitable_name(Dest),
     {_, Ref} = attach_monitor(SName),

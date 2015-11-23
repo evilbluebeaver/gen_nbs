@@ -1,7 +1,7 @@
 gen_nbs
 =====
 
-An OTP library
+Non-blocking server
 
 Build
 -----

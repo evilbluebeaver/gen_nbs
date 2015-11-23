@@ -1,5 +1,5 @@
 {application, 'gen_nbs',
- [{description, "An OTP library"},
+ [{description, "Non-blocking server"},
   {vsn, "0.1.0"},
   {registered, []},
   {applications,

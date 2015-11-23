@@ -73,6 +73,9 @@ handle_cast({msg_await_timeout, Timeout}, State) ->
 handle_cast({msg_manual_ack, Msg, To}, State) ->
     Await = gen_nbs:msg(To, {manual_ack, Msg}),
     {await, Await, State};
+handle_cast({msg_manual_fail, Msg, To}, State) ->
+    Await = gen_nbs:msg(To, {manual_fail, Msg}),
+    {await, Await, State};
 handle_cast({msg_ack, Msg, To}, State) ->
     Await = gen_nbs:msg(To, {ack, Msg}),
     {await, Await, State};
@@ -96,6 +99,10 @@ handle_msg({timeout, Timeout, Msg}, F={From, _}, State={notify, Pid}) ->
 handle_msg({manual_ack, Msg}, F={From, _}, State={notify, Pid}) ->
     Pid ! {self(), {msg, Msg, From}},
     gen_nbs:ack(F),
+    {ok, State};
+handle_msg({manual_fail, Msg}, F={From, _}, State={notify, Pid}) ->
+    Pid ! {self(), {msg, Msg, From}},
+    gen_nbs:fail(F),
     {ok, State};
 handle_msg({ack, Msg}, F={From, _}, State={notify, Pid}) ->
     Pid ! {self(), {msg, Msg, From}},

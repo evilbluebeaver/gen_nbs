@@ -92,7 +92,7 @@
          multimsg/2, multimsg/3, multimsg/4,
          stop/1, stop/3,
          cast/2, msg/2, msg/3,
-         ack/1,
+         ack/1, fail/1,
          enter_loop/3, enter_loop/4, enter_loop/5, wake_hib/1]).
 
 %% System exports
@@ -214,11 +214,15 @@ msg(Dest, Msg, Timeout) ->
     do_send(Dest, msg, Msg, Timeout).
 
 %% -----------------------------------------------------------------
-%% Acknowledgement
+%% Manual ack/fail
 %% -----------------------------------------------------------------
 
 ack(?TAG(From, Ref)) ->
     From ! ?ACK(?TAG(self(), Ref)),
+    ok.
+
+fail(?TAG(From, Ref)) ->
+    From ! ?FAIL(?TAG(self(), Ref)),
     ok.
 
 %% -----------------------------------------------------------------

@@ -487,6 +487,14 @@ test_msg(_Config) ->
     wait_for_msg(Pid1, {ack, Pid2}),
 
     %%
+    %% Manual fail
+    %%
+    gen_nbs:cast(Pid1, {msg_manual_fail, Msg, Pid2}),
+    wait_for_msg(Pid2, {msg, Msg, Pid1}),
+    timer:sleep(?TIMEOUT),
+    wait_for_msg(Pid1, {fail, Pid2}),
+
+    %%
     %% Multiple msgs
     %%
     gen_nbs:cast(Pid1, {msg_multiple, Msg, Pid2, ?TIMEOUT}),

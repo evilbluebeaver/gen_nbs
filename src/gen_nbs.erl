@@ -267,7 +267,7 @@ do_send(Dest, msg, Msg, infinity) ->
     SName = monitor_suitable_name(Dest),
     Ref = monitor(process, SName),
     do_cmd_send(Dest, ?MSG({self(), Ref}, Msg)),
-    [];
+    {Ref, make_ref()};
 do_send(Dest, msg, Msg, Timeout) ->
     SName = monitor_suitable_name(Dest),
     Ref = monitor(process, SName),

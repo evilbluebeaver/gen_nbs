@@ -64,23 +64,15 @@ end_per_group(_, _Config) ->
 
 init_per_testcase(_, Config) ->
     TrapFlag = process_flag(trap_exit, true),
-    {links, Links} = process_info(self(), links),
-    [{trap_flag, TrapFlag}, {links, lists:sort(Links)} | Config].
+    [{trap_flag, TrapFlag} | Config].
 
 end_per_testcase(Test, Config) ->
     TrapFlag = proplists:get_value(trap_flag, Config),
-    Links = proplists:get_value(links, Config),
     process_flag(trap_exit, TrapFlag),
-    {links, NewLinks} = process_info(self(), links),
-    case Links == lists:sort(NewLinks) of
-        false ->
-            {fail, [Test, links]};
-        true ->
-            receive
-                Else -> {fail, [Test, Else]}
-            after ?TIMEOUT ->
-                      ok
-            end
+    receive
+        Else -> {fail, [Test, Else]}
+    after ?TIMEOUT ->
+              ok
     end.
 
 %%
@@ -430,9 +422,9 @@ test_msg(_Config) ->
     gen_nbs:cast(Pid1, {msg_no_ack, Msg, Pid2, ?TIMEOUT}),
     wait_for_msg(Pid2, {msg, Msg, Pid1}),
     timer:sleep(?TIMEOUT),
-    wait_for_msg(Pid1, {fail, Pid2}),
+    wait_for_msg(Pid1, fail),
 
-    %%
+    %
     %% Post with no ack needed
     %%
     gen_nbs:cast(Pid1, {msg_no_ack, Msg, Pid2, infinity}),
@@ -444,7 +436,7 @@ test_msg(_Config) ->
     gen_nbs:cast(Pid1, {msg_ack, Msg, Pid2}),
     wait_for_msg(Pid2, {msg, Msg, Pid1}),
     timer:sleep(?TIMEOUT),
-    wait_for_msg(Pid1, {ack, Pid2}),
+    wait_for_msg(Pid1, ack),
 
     %%
     %% Long ack
@@ -452,14 +444,14 @@ test_msg(_Config) ->
     gen_nbs:cast(Pid1, {msg_long_ack, Msg, Pid2, ?TIMEOUT}),
     wait_for_msg(Pid2, {msg, Msg, Pid1}),
     timer:sleep(?TIMEOUT),
-    wait_for_msg(Pid1, {fail, Pid2}),
+    wait_for_msg(Pid1, fail),
 
     %%
     %% Ack with timeout after it
     %%
     gen_nbs:cast(Pid1, {msg_ack_timeout, Msg, Pid2, ?TIMEOUT}),
     wait_for_msg(Pid2, {msg, Msg, Pid1}),
-    wait_for_msg(Pid1, {ack, Pid2}),
+    wait_for_msg(Pid1, ack),
     timer:sleep(?TIMEOUT),
     wait_for_msg(Pid2, {info, timeout}),
 
@@ -469,7 +461,7 @@ test_msg(_Config) ->
     gen_nbs:cast(Pid1, {msg_no_await, Msg, Pid2, ?TIMEOUT}),
     wait_for_msg(Pid2, {msg, Msg, Pid1}),
     timer:sleep(?TIMEOUT),
-    wait_for_msg(Pid1, {fail, Pid2}),
+    wait_for_msg(Pid1, fail),
 
     %%
     %% Msg await timeout
@@ -483,8 +475,16 @@ test_msg(_Config) ->
     %%
     gen_nbs:cast(Pid1, {msg_manual_ack, Msg, Pid2}),
     wait_for_msg(Pid2, {msg, Msg, Pid1}),
+    timer:sleep(2 * ?TIMEOUT),
+    wait_for_msg(Pid1, ack),
+
+    %%
+    %% Manual fail
+    %%
+    gen_nbs:cast(Pid1, {msg_manual_fail, Msg, Pid2}),
+    wait_for_msg(Pid2, {msg, Msg, Pid1}),
     timer:sleep(?TIMEOUT),
-    wait_for_msg(Pid1, {ack, Pid2}),
+    wait_for_msg(Pid1, fail),
 
     %%
     %% Multiple msgs
@@ -492,14 +492,14 @@ test_msg(_Config) ->
     gen_nbs:cast(Pid1, {msg_multiple, Msg, Pid2, ?TIMEOUT}),
     wait_for_msg(Pid2, {msg, Msg, Pid1}),
     wait_for_msg(Pid2, {msg, Msg, Pid1}),
-    wait_for_msg(Pid1, {ack, Pid2}),
-    wait_for_msg(Pid1, {ack, Pid2}),
+    wait_for_msg(Pid1, ack),
+    wait_for_msg(Pid1, ack),
 
     %%
     %% Post with no ack needed (unexisting_process)
     %%
     gen_nbs:cast(Pid1, {msg_no_ack, Msg, fake_name, infinity}),
-    wait_for_msg(Pid1, {fail, {fake_name, node()}}),
+    wait_for_msg(Pid1, fail),
 
     %%
     %% Post (globally registered process)

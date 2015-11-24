@@ -92,7 +92,7 @@
          multimsg/2, multimsg/3, multimsg/4,
          stop/1, stop/3,
          cast/2, msg/2, msg/3,
-         ack/1,
+         ack/1, fail/1,
          enter_loop/3, enter_loop/4, enter_loop/5, wake_hib/1]).
 
 %% System exports
@@ -151,10 +151,10 @@
 
 -define(TAG(What, Ref), {What, Ref}).
 
--define(ACK(Tag),       {'$gen_ack',    Tag}).
+-define(ACK(Ref),       {'$gen_ack',    Ref}).
 -define(CAST(Msg),      {'$gen_cast',   Msg}).
--define(MSG(Tag, Msg),  {'$gen_msg',   Tag, Msg}).
--define(FAIL(Tag),      {'$gen_fail',   Tag}).
+-define(MSG(Tag, Msg),  {'$gen_msg',    Tag, Msg}).
+-define(FAIL(Ref),      {'$gen_fail',   Ref}).
 
 
 %%%  -----------------------------------------------------------------
@@ -214,11 +214,15 @@ msg(Dest, Msg, Timeout) ->
     do_send(Dest, msg, Msg, Timeout).
 
 %% -----------------------------------------------------------------
-%% Acknowledgement
+%% Manual ack/fail
 %% -----------------------------------------------------------------
 
 ack(?TAG(From, Ref)) ->
-    From ! ?ACK(?TAG(self(), Ref)),
+    From ! ?ACK(Ref),
+    ok.
+
+fail(?TAG(From, Ref)) ->
+    From ! ?FAIL(Ref),
     ok.
 
 %% -----------------------------------------------------------------
@@ -261,29 +265,26 @@ do_send(Dest, cast, Msg, _) ->
     do_cmd_send(Dest, ?CAST(Msg));
 do_send(Dest, msg, Msg, infinity) ->
     SName = monitor_suitable_name(Dest),
-    {_, Ref} = attach_monitor(SName),
-    do_cmd_send(SName, ?MSG({self(), Ref}, Msg)),
+    Ref = monitor(process, SName),
+    do_cmd_send(Dest, ?MSG({self(), Ref}, Msg)),
     [];
 do_send(Dest, msg, Msg, Timeout) ->
     SName = monitor_suitable_name(Dest),
-    Tag = {_, Ref} = attach_monitor(SName),
-    TimerRef = erlang:send_after(Timeout, self(), ?FAIL(Tag)),
-    do_cmd_send(SName, ?MSG({self(), Ref}, Msg)),
-    {Tag, TimerRef}.
+    Ref = monitor(process, SName),
+    TimerRef = erlang:send_after(Timeout, self(), ?FAIL(Ref)),
+    do_cmd_send(Dest, ?MSG({self(), Ref}, Msg)),
+    {Ref, TimerRef}.
 
 monitor_suitable_name(Pid) when is_pid(Pid) ->
     Pid;
 monitor_suitable_name(Name) when is_atom(Name) ->
-    {Name, node()};
+    Name;
 monitor_suitable_name({global, Name}) ->
     global:whereis_name(Name);
 monitor_suitable_name({via, Mod, Name}) ->
     Mod:whereis_name(Name);
 monitor_suitable_name({Dest, Node}=FullName) when is_atom(Dest), is_atom(Node) ->
     FullName.
-
-attach_monitor(Dest) ->
-    ?TAG(Dest, monitor(process, Dest)).
 
 do_cmd_send({global, Name}, Cmd) ->
     catch global:send(Name, Cmd),
@@ -475,31 +476,31 @@ decode_msg(Msg, InnerState=#inner_state{parent=Parent,
 %% report.
 %% ---------------------------------------------------
 
-try_dispatch({'DOWN', Ref, process, Pid, _Info}, Mod, State, Timers) ->
-    try_dispatch(?FAIL(?TAG(Pid, Ref)), Mod, State, Timers);
+try_dispatch({'DOWN', Ref, process, _Pid, _Info}, Mod, State, Timers) ->
+    try_dispatch(?FAIL(Ref), Mod, State, Timers);
 try_dispatch(?CAST(Msg), Mod, State, _Timers) ->
     try_handle(Mod, handle_cast, [Msg, State]);
 try_dispatch(?MSG(Tag, Msg), Mod, State, _Timers) ->
     try_handle(Mod, handle_msg, [Msg, Tag, State]);
-try_dispatch(?FAIL(Tag=?TAG(_From, Ref)), Mod, State, Timers) ->
+try_dispatch(?FAIL(Ref), Mod, State, Timers) ->
     true = demonitor(Ref),
-    case maps:find(Tag, Timers) of
+    case maps:find(Ref, Timers) of
         error ->
-            try_handle(Mod, handle_fail, [Tag, State]);
+            try_handle(Mod, handle_fail, [Ref, State]);
         {ok, Timer} ->
-            NTimers = maps:remove(Tag, Timers),
+            NTimers = maps:remove(Ref, Timers),
             erlang:cancel_timer(Timer),
-            try_handle(Mod, handle_fail, [Tag, State], NTimers)
+            try_handle(Mod, handle_fail, [Ref, State], NTimers)
     end;
-try_dispatch(?ACK(Tag=?TAG(_From, Ref)), Mod, State, Timers) ->
+try_dispatch(?ACK(Ref), Mod, State, Timers) ->
     true = demonitor(Ref),
-    case maps:find(Tag, Timers) of
+    case maps:find(Ref, Timers) of
         error ->
             {ok, {ok, State}};
         {ok, Timer} ->
-            NTimers = maps:remove(Tag, Timers),
+            NTimers = maps:remove(Ref, Timers),
             erlang:cancel_timer(Timer),
-            try_handle(Mod, handle_ack, [Tag, State], NTimers)
+            try_handle(Mod, handle_ack, [Ref, State], NTimers)
     end;
 try_dispatch(Info, Mod, State, _Timers) ->
     try_handle(Mod, handle_info, [Info, State]).
@@ -508,7 +509,7 @@ try_handle(Mod, Func, Args) ->
     try_handle(Mod, Func, Args, undefined).
 
 try_handle(Mod, Func, Args, Timers) ->
-    try
+   try
         Reply = erlang:apply(Mod, Func, Args),
         case Timers of
             undefined ->
@@ -562,12 +563,12 @@ handle_common_reply(Reply, Msg, InnerState=#inner_state{timers=Timers}) ->
                                 InnerState#inner_state{state=NState, timers=NTimers}),
             loop(NInnerState#inner_state{timeout=Time});
         {ok, {ack, ?TAG(From, Ref)=Tag, NState}} ->
-            From ! ?ACK(?TAG(self(), Ref)),
+            From ! ?ACK(Ref),
             NInnerState = debug(?ACK_RET(Tag),
                                 InnerState#inner_state{state=NState}),
             loop(NInnerState#inner_state{timeout=infinity});
         {ok, {ack, ?TAG(From, Ref)=Tag, NState, Time}} ->
-            From ! ?ACK(?TAG(self(), Ref)),
+            From ! ?ACK(Ref),
             NInnerState = debug(?ACK_RET(Tag),
                                 InnerState#inner_state{state=NState}),
             loop(NInnerState#inner_state{timeout=Time});
@@ -594,9 +595,11 @@ handle_common_reply(Reply, Msg, InnerState=#inner_state{timers=Timers}) ->
 update_timers([], Timers) ->
     Timers;
 update_timers(Await, Timers) when is_list(Await) ->
-    lists:foldl(fun({Tag, Timer}, Acc) -> maps:put(Tag, Timer, Acc) end, Timers, Await);
-update_timers({Tag, Timer}, Timers) ->
-    maps:put(Tag, Timer, Timers).
+    lists:foldl(fun({Ref, Timer}, Acc) ->
+                        maps:put(Ref, Timer, Acc) end,
+                Timers, Await);
+update_timers({Ref, Timer}, Timers) ->
+    maps:put(Ref, Timer, Timers).
 
 
 %%-----------------------------------------------------------------
@@ -643,12 +646,12 @@ debug(Msg, InnerState=#inner_state{name=Name,
 print_event(Dev, ?CAST(Msg), Name) ->
     io:format(Dev, "*DBG* ~p got cast ~p~n",
               [Name, Msg]);
-print_event(Dev, ?ACK(Msg), Name) ->
+print_event(Dev, ?ACK(Ref), Name) ->
     io:format(Dev, "*DBG* ~p got acknowledgement ~p~n",
-              [Name, Msg]);
-print_event(Dev, ?FAIL(Tag), Name) ->
+              [Name, Ref]);
+print_event(Dev, ?FAIL(Ref), Name) ->
     io:format(Dev, "*DBG* ~p message to ~p timed out~n",
-              [Name, Tag]);
+              [Name, Ref]);
 print_event(Dev, ?MSG(Tag, Msg), Name) ->
     io:format(Dev, "*DBG* ~p got msg ~p from ~p~n",
               [Name, Msg, Tag]);

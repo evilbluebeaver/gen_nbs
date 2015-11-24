@@ -111,12 +111,12 @@ handle_msg(Msg, {From, _}, State={notify, Pid}) ->
     Pid ! {self(), {msg, Msg, From}},
     {ok, State}.
 
-handle_ack({From, _}, State={notify, Pid}) ->
-    Pid ! {self(), {ack, From}},
+handle_ack(_Ref, State={notify, Pid}) ->
+    Pid ! {self(), ack},
     {ok, State}.
 
-handle_fail({From, _}, State={notify, Pid}) ->
-    Pid ! {self(), {fail, From}},
+handle_fail(_Ref, State={notify, Pid}) ->
+    Pid ! {self(), fail},
     {ok, State}.
 
 handle_info(Msg, State={notify, Pid}) ->

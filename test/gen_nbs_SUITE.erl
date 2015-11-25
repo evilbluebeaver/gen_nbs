@@ -469,6 +469,14 @@ test_msg(_Config) ->
     gen_nbs:cast(Pid1, {msg_no_ack, Msg, Pid2, infinity}),
     ?WAIT_FOR_MSG({Pid2, {msg, Msg, Pid1}}),
 
+    %
+    %% Post ack infinity
+    %%
+    gen_nbs:cast(Pid1, {msg_ack_timeout, Msg, Pid2, infinity}),
+    ?WAIT_FOR_MSG({Pid2, {msg, Msg, Pid1}}),
+    timer:sleep(?TIMEOUT),
+    ?WAIT_FOR_MSG({Pid1, ack}),
+
     %%
     %% Successful ack
     %%

@@ -505,7 +505,12 @@ try_dispatch(?FAIL(Ref), Mod, State, Timers) ->
             try_handle(Mod, handle_fail, [Ref, State]);
         {ok, Timer} ->
             NTimers = maps:remove(Ref, Timers),
-            erlang:cancel_timer(Timer),
+            case Timer of
+                undefined ->
+                    ok;
+                _ ->
+                    erlang:cancel_timer(Timer)
+            end,
             try_handle(Mod, handle_fail, [Ref, State], NTimers)
     end;
 try_dispatch(?ACK(Ref), Mod, State, Timers) ->
@@ -515,7 +520,12 @@ try_dispatch(?ACK(Ref), Mod, State, Timers) ->
             {ok, {ok, State}};
         {ok, Timer} ->
             NTimers = maps:remove(Ref, Timers),
-            erlang:cancel_timer(Timer),
+            case Timer of
+                undefined ->
+                    ok;
+                _ ->
+                    erlang:cancel_timer(Timer)
+            end,
             try_handle(Mod, handle_ack, [Ref, State], NTimers)
     end;
 try_dispatch(Info, Mod, State, _Timers) ->
@@ -614,8 +624,8 @@ update_timers(Await, Timers) when is_list(Await) ->
     lists:foldl(fun update_timers/2, Timers, Await);
 update_timers({Ref, Timer}, Timers) ->
     maps:put(Ref, Timer, Timers);
-update_timers(_Ref, Timers) ->
-    Timers.
+update_timers(Ref, Timers) ->
+    maps:put(Ref, undefined, Timers).
 
 
 %%-----------------------------------------------------------------

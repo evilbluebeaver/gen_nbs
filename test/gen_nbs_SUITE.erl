@@ -27,6 +27,7 @@
          test_info/1,
          test_msg/1,
          test_send/1,
+         test_ref/1,
          test_misc/1,
          test_format_status/1,
          test_error/1]).
@@ -35,11 +36,31 @@
 -define(TEST_MODULE, test_nbs).
 -define(TEST_FORMAT_MODULE, test_nbs_format).
 
+-define(CHECK_AFTER,
+    receive
+        Else -> {fail, [Test, Else]}
+    after ?TIMEOUT ->
+              ok
+    end).
+-define(WAIT_FOR_MSG(MSG),
+        receive
+            MSG ->
+                ok
+        after 5000 ->
+                  ct:fail(timeout)
+        end).
+
+-define(WAIT_FOR_DOWN(PID),
+        ?WAIT_FOR_MSG({'DOWN', _, process, PID, _})).
+
+-define(WAIT_FOR_EXIT(PID),
+        ?WAIT_FOR_MSG({'EXIT', PID, _})).
+
 %%
 %% CT functions
 %%
 groups() ->
-    [{messages, [], [test_cast, test_info, test_msg, test_misc, test_error, test_send, test_abcast, test_multimsg]},
+    [{messages, [], [test_cast, test_info, test_msg, test_misc, test_error, test_send, test_ref, test_abcast, test_multimsg]},
      {enter_loop, [], [test_enter_loop, test_enter_loop_local, test_enter_loop_global, test_enter_loop_via]}].
 
 all() ->
@@ -69,11 +90,7 @@ init_per_testcase(_, Config) ->
 end_per_testcase(Test, Config) ->
     TrapFlag = proplists:get_value(trap_flag, Config),
     process_flag(trap_exit, TrapFlag),
-    receive
-        Else -> {fail, [Test, Else]}
-    after ?TIMEOUT ->
-              ok
-    end.
+    ?CHECK_AFTER.
 
 %%
 %% Test functions
@@ -133,14 +150,14 @@ test_start(_Config) ->
     true = erlang:is_process_alive(Pid7),
     gen_nbs:stop(Pid7),
     false = erlang:is_process_alive(Pid7),
-    wait_for_exit(Pid7),
+    ?WAIT_FOR_EXIT(Pid7),
 
     {ok, Pid8} = gen_nbs:start_link({local, test_name}, ?TEST_MODULE, [], []),
     true = erlang:is_process_alive(Pid8),
     gen_nbs:stop(Pid8),
     false = erlang:is_process_alive(Pid8),
     undefined = erlang:whereis(test_name),
-    wait_for_exit(Pid8),
+    ?WAIT_FOR_EXIT(Pid8),
 
     {ok, Pid9} = gen_nbs:start(?TEST_MODULE, [], []),
     true = erlang:is_process_alive(Pid9),
@@ -148,7 +165,7 @@ test_start(_Config) ->
     false = erlang:is_process_alive(Pid9),
 
     Pid10 = erlang:spawn_link(fun() -> gen_nbs:start_link({local, test_name}, ?TEST_MODULE, trap_exit, [])  end),
-    wait_for_exit(Pid10),
+    ?WAIT_FOR_EXIT(Pid10),
     undefined = erlang:whereis(test_name),
 
     ok.
@@ -158,7 +175,7 @@ test_enter_loop(_Config) ->
                                        gen_nbs:enter_loop(?TEST_MODULE, [], [])
                                end),
     gen_nbs:stop(Pid1),
-    wait_for_exit(Pid1),
+    ?WAIT_FOR_EXIT(Pid1),
 
     erlang:register(test_name, self()),
     Pid2 = proc_lib:spawn_link(fun() ->
@@ -166,25 +183,25 @@ test_enter_loop(_Config) ->
                                end),
     gen_nbs:stop(Pid2),
     erlang:unregister(test_name),
-    wait_for_exit(Pid2),
+    ?WAIT_FOR_EXIT(Pid2),
 
     erlang:register(test_name, self()),
     Pid3 = proc_lib:spawn_link(fun() ->
                                        erlang:unregister(test_name),
                                        gen_nbs:enter_loop(?TEST_MODULE, [], [])
                                end),
-    wait_for_exit(Pid3),
+    ?WAIT_FOR_EXIT(Pid3),
 
     Pid4 = spawn_link(fun() ->
                               gen_nbs:enter_loop(?TEST_MODULE, [], [])
                       end),
-    wait_for_exit(Pid4),
+    ?WAIT_FOR_EXIT(Pid4),
 
     Pid5 = proc_lib:spawn_link(fun() ->
                                        gen_nbs:enter_loop(?TEST_MODULE, [], [], ?TIMEOUT)
                                end),
     gen_nbs:stop(Pid5),
-    wait_for_exit(Pid5),
+    ?WAIT_FOR_EXIT(Pid5),
     ok.
 
 %%
@@ -197,19 +214,19 @@ test_enter_loop_local(_Config) ->
                                end),
     gen_nbs:stop(Pid1),
     undefined = whereis(test_name),
-    wait_for_exit(Pid1),
+    ?WAIT_FOR_EXIT(Pid1),
 
     Pid2 = proc_lib:spawn_link(fun() ->
                                        gen_nbs:enter_loop(?TEST_MODULE, [], [], {local, test_name})
                                end),
-    wait_for_exit(Pid2),
+    ?WAIT_FOR_EXIT(Pid2),
     undefined = whereis(test_name),
 
     Pid3 = proc_lib:spawn_link(fun() ->
                                        erlang:register(test_name, self()),
                                        gen_nbs:enter_loop(?TEST_MODULE, [], [], {local, test_name_2})
                                end),
-    wait_for_exit(Pid3),
+    ?WAIT_FOR_EXIT(Pid3),
     undefined = whereis(test_name),
 
     ok.
@@ -223,27 +240,27 @@ test_enter_loop_global(_Config) ->
                                        gen_nbs:enter_loop(?TEST_MODULE, [], [], {global, test_name})
                                end),
     gen_nbs:stop(Pid1),
-    wait_for_exit(Pid1),
+    ?WAIT_FOR_EXIT(Pid1),
     undefined = global:whereis_name(test_name),
 
     Pid2 = proc_lib:spawn_link(fun() ->
                                        gen_nbs:enter_loop(?TEST_MODULE, [], [], {global, test_name})
                                end),
-    wait_for_exit(Pid2),
+    ?WAIT_FOR_EXIT(Pid2),
     undefined = global:whereis_name(test_name),
 
     Pid3 = proc_lib:spawn_link(fun() ->
                                        global:register_name(test_name, self()),
                                        gen_nbs:enter_loop(?TEST_MODULE, [], [], {global, test_name_2})
                                end),
-    wait_for_exit(Pid3),
+    ?WAIT_FOR_EXIT(Pid3),
     undefined = global:whereis_name(test_name),
 
     global:register_name(test_name, self()),
     Pid4 = proc_lib:spawn_link(fun() ->
                                        gen_nbs:enter_loop(?TEST_MODULE, [], [], {global, test_name})
                                end),
-    wait_for_exit(Pid4),
+    ?WAIT_FOR_EXIT(Pid4),
     global:unregister_name(test_name),
 
     ok.
@@ -257,27 +274,27 @@ test_enter_loop_via(_Config) ->
                                        gen_nbs:enter_loop(?TEST_MODULE, [], [], {via, global, test_name})
                                end),
     gen_nbs:stop(Pid1),
-    wait_for_exit(Pid1),
+    ?WAIT_FOR_EXIT(Pid1),
     undefined = global:whereis_name(test_name),
 
     Pid2 = proc_lib:spawn_link(fun() ->
                                        gen_nbs:enter_loop(?TEST_MODULE, [], [], {via, global, test_name})
                                end),
-    wait_for_exit(Pid2),
+    ?WAIT_FOR_EXIT(Pid2),
     undefined = global:whereis_name(test_name),
 
     Pid3 = proc_lib:spawn_link(fun() ->
                                        global:register_name(test_name, self()),
                                        gen_nbs:enter_loop(?TEST_MODULE, [], [], {via, global, test_name_2})
                                end),
-    wait_for_exit(Pid3),
+    ?WAIT_FOR_EXIT(Pid3),
     undefined = global:whereis_name(test_name),
 
     global:register_name(test_name, self()),
     Pid4 = proc_lib:spawn_link(fun() ->
                                        gen_nbs:enter_loop(?TEST_MODULE, [], [], {via, global, test_name})
                                end),
-    wait_for_exit(Pid4),
+    ?WAIT_FOR_EXIT(Pid4),
     global:unregister_name(test_name),
 
     ok.
@@ -296,73 +313,75 @@ test_sys(_Config) ->
     [] = sys:replace_state(Pid, fun(S) -> S end),
     _ = sys:get_status(Pid),
     gen_nbs:stop(Pid),
-    wait_for_exit(Pid),
+    ?WAIT_FOR_EXIT(Pid),
     ok.
 
 test_cast(_Config) ->
     {ok, Pid} = gen_nbs:start_link(?TEST_MODULE, {notify, self()}, []),
     gen_nbs:cast(Pid, message),
-    wait_for_msg(Pid, {cast, message}),
+    ?WAIT_FOR_MSG({Pid, {cast, message}}),
     gen_nbs:stop(Pid),
-    wait_for_exit(Pid),
+    ?WAIT_FOR_EXIT(Pid),
     ok.
 
 test_abcast(_Config) ->
     {ok, Pid} = gen_nbs:start_link({local, test_name}, ?TEST_MODULE, {notify, self()}, []),
     gen_nbs:abcast(test_name, message),
-    wait_for_msg(Pid, {cast, message}),
+    ?WAIT_FOR_MSG({Pid, {cast, message}}),
     gen_nbs:abcast([node()], test_name, message),
-    wait_for_msg(Pid, {cast, message}),
+    ?WAIT_FOR_MSG({Pid, {cast, message}}),
     gen_nbs:stop(Pid),
-    wait_for_exit(Pid),
+    ?WAIT_FOR_EXIT(Pid),
     ok.
 
 test_multimsg(_Config) ->
     {ok, Pid} = gen_nbs:start_link({local, test_name}, ?TEST_MODULE, {notify, self()}, []),
     gen_nbs:multimsg(test_name, message),
-    wait_for_msg(Pid, {msg, message, self()}),
+    Self = self(),
+    ?WAIT_FOR_MSG({Pid, {msg, message, Self}}),
     gen_nbs:multimsg([node()], test_name, message),
-    wait_for_msg(Pid, {msg, message, self()}),
+    ?WAIT_FOR_MSG({Pid, {msg, message, Self}}),
     gen_nbs:multimsg(test_name, message, infinity),
-    wait_for_msg(Pid, {msg, message, self()}),
+    ?WAIT_FOR_MSG({Pid, {msg, message, Self}}),
     gen_nbs:multimsg([node()], test_name, message, infinity),
-    wait_for_msg(Pid, {msg, message, self()}),
+    ?WAIT_FOR_MSG({Pid, {msg, message, Self}}),
     gen_nbs:stop(Pid),
-    wait_for_down({test_name, node()}),
-    wait_for_down({test_name, node()}),
-    wait_for_down({test_name, node()}),
-    wait_for_down({test_name, node()}),
-    wait_for_exit(Pid),
+    Node = node(),
+    ?WAIT_FOR_DOWN({test_name, Node}),
+    ?WAIT_FOR_DOWN({test_name, Node}),
+    ?WAIT_FOR_DOWN({test_name, Node}),
+    ?WAIT_FOR_DOWN({test_name, Node}),
+    ?WAIT_FOR_EXIT(Pid),
     ok.
 
 test_error(_Config) ->
     {ok, Pid1} = gen_nbs:start_link(?TEST_MODULE, [], [{debug, [trace]}]),
     gen_nbs:cast(Pid1, error),
-    wait_for_exit(Pid1),
+    ?WAIT_FOR_EXIT(Pid1),
 
     {ok, Pid2} = gen_nbs:start_link(?TEST_MODULE, [], [{debug, [trace]}]),
     gen_nbs:cast(Pid2, throw),
-    wait_for_exit(Pid2),
+    ?WAIT_FOR_EXIT(Pid2),
 
     {ok, Pid3} = gen_nbs:start_link(?TEST_MODULE, [], [{debug, [trace]}]),
     gen_nbs:cast(Pid3, exit),
-    wait_for_exit(Pid3),
+    ?WAIT_FOR_EXIT(Pid3),
 
     {ok, Pid4} = gen_nbs:start_link(?TEST_MODULE, [], [{debug, [trace]}]),
     catch gen_nbs:stop(Pid4, error, ?TIMEOUT),
-    wait_for_exit(Pid4),
+    ?WAIT_FOR_EXIT(Pid4),
 
     {ok, Pid5} = gen_nbs:start_link(?TEST_MODULE, [], [{debug, [trace]}]),
     gen_nbs:stop(Pid5, throw, ?TIMEOUT),
-    wait_for_exit(Pid5),
+    ?WAIT_FOR_EXIT(Pid5),
 
     {ok, Pid6} = gen_nbs:start_link(?TEST_MODULE, [], [{debug, [trace]}]),
     catch gen_nbs:stop(Pid6, exit, ?TIMEOUT),
-    wait_for_exit(Pid6),
+    ?WAIT_FOR_EXIT(Pid6),
 
     {ok, Pid7} = gen_nbs:start_link(?TEST_MODULE, [], [{debug, trace}]),
     gen_nbs:stop(Pid7, unknown, ?TIMEOUT),
-    wait_for_exit(Pid7),
+    ?WAIT_FOR_EXIT(Pid7),
 
     ok.
 
@@ -370,44 +389,64 @@ test_misc(_Config) ->
     {ok, Pid1} = gen_nbs:start_link(?TEST_MODULE, {notify, self()}, [{debug, [trace]}]),
     gen_nbs:cast(Pid1, {timeout, ?TIMEOUT}),
     timer:sleep(?TIMEOUT),
-    wait_for_msg(Pid1, {info, timeout}),
+    ?WAIT_FOR_MSG({Pid1, {info, timeout}}),
     gen_nbs:cast(Pid1, stop),
-    wait_for_exit(Pid1),
+    ?WAIT_FOR_EXIT(Pid1),
     ok.
 
 test_info(_Config) ->
     {ok, Pid} = gen_nbs:start_link(?TEST_MODULE, {notify, self()}, [{debug, [trace]}]),
     Msg = message,
     Pid ! Msg,
-    wait_for_msg(Pid, {info, Msg}),
+    ?WAIT_FOR_MSG({Pid, {info, Msg}}),
     gen_nbs:stop(Pid),
-    wait_for_exit(Pid),
+    ?WAIT_FOR_EXIT(Pid),
     ok.
 
 test_send(_Config) ->
     {ok, Pid1} = gen_nbs:start_link({global, test_name}, ?TEST_MODULE, {notify, self()}, []),
     gen_nbs:cast({global, test_name}, message),
-    wait_for_msg(Pid1, {cast, message}),
+    ?WAIT_FOR_MSG({Pid1, {cast, message}}),
     gen_nbs:stop(Pid1),
-    wait_for_exit(Pid1),
+    ?WAIT_FOR_EXIT(Pid1),
     undefined = global:whereis_name(test_name),
 
     {ok, Pid2} = gen_nbs:start_link({via, global, test_name}, ?TEST_MODULE, {notify, self()}, []),
     gen_nbs:cast({via, global, test_name}, message),
-    wait_for_msg(Pid2, {cast, message}),
+    ?WAIT_FOR_MSG({Pid2, {cast, message}}),
     gen_nbs:stop(Pid2),
-    wait_for_exit(Pid2),
+    ?WAIT_FOR_EXIT(Pid2),
     undefined = global:whereis_name(test_name),
 
     {ok, Pid3} = gen_nbs:start_link({local, test_name}, ?TEST_MODULE, {notify, self()}, []),
     gen_nbs:cast(test_name, message),
-    wait_for_msg(Pid3, {cast, message}),
+    ?WAIT_FOR_MSG({Pid3, {cast, message}}),
     gen_nbs:stop(Pid3),
-    wait_for_exit(Pid3),
+    ?WAIT_FOR_EXIT(Pid3),
     undefined = erlang:whereis(test_name),
 
     %% Fake node send
     gen_nbs:cast({test_name, fake_node}, message).
+
+test_ref(_Config) ->
+    {ok, Pid} = gen_nbs:start_link(?TEST_MODULE, {notify, self()}, [{debug, [trace]}]),
+    Ref1 = gen_nbs:ref(gen_nbs:msg(Pid, message, ?TIMEOUT)),
+    Self = self(),
+
+    ?WAIT_FOR_MSG({Pid, {msg, message, Self}}),
+    timer:sleep(?TIMEOUT),
+    ?WAIT_FOR_MSG({'$gen_fail', Ref1}),
+
+    _Ref2 = gen_nbs:ref(gen_nbs:msg(Pid, message, infinity)),
+    Self = self(),
+    ?WAIT_FOR_MSG({Pid, {msg, message, Self}}),
+
+    gen_nbs:stop(Pid),
+    ?WAIT_FOR_DOWN(Pid),
+    ?WAIT_FOR_DOWN(Pid),
+    ?WAIT_FOR_EXIT(Pid).
+
+
 
 test_msg(_Config) ->
     {ok, Pid1} = gen_nbs:start_link(?TEST_MODULE, {notify, self()}, [{debug, [trace]}]),
@@ -420,113 +459,113 @@ test_msg(_Config) ->
     %% No ack
     %%
     gen_nbs:cast(Pid1, {msg_no_ack, Msg, Pid2, ?TIMEOUT}),
-    wait_for_msg(Pid2, {msg, Msg, Pid1}),
+    ?WAIT_FOR_MSG({Pid2, {msg, Msg, Pid1}}),
     timer:sleep(?TIMEOUT),
-    wait_for_msg(Pid1, fail),
+    ?WAIT_FOR_MSG({Pid1, fail}),
 
     %
     %% Post with no ack needed
     %%
     gen_nbs:cast(Pid1, {msg_no_ack, Msg, Pid2, infinity}),
-    wait_for_msg(Pid2, {msg, Msg, Pid1}),
+    ?WAIT_FOR_MSG({Pid2, {msg, Msg, Pid1}}),
 
     %%
     %% Successful ack
     %%
     gen_nbs:cast(Pid1, {msg_ack, Msg, Pid2}),
-    wait_for_msg(Pid2, {msg, Msg, Pid1}),
+    ?WAIT_FOR_MSG({Pid2, {msg, Msg, Pid1}}),
     timer:sleep(?TIMEOUT),
-    wait_for_msg(Pid1, ack),
+    ?WAIT_FOR_MSG({Pid1, ack}),
 
     %%
     %% Long ack
     %%
     gen_nbs:cast(Pid1, {msg_long_ack, Msg, Pid2, ?TIMEOUT}),
-    wait_for_msg(Pid2, {msg, Msg, Pid1}),
+    ?WAIT_FOR_MSG({Pid2, {msg, Msg, Pid1}}),
     timer:sleep(?TIMEOUT),
-    wait_for_msg(Pid1, fail),
+    ?WAIT_FOR_MSG({Pid1, fail}),
 
     %%
     %% Ack with timeout after it
     %%
     gen_nbs:cast(Pid1, {msg_ack_timeout, Msg, Pid2, ?TIMEOUT}),
-    wait_for_msg(Pid2, {msg, Msg, Pid1}),
-    wait_for_msg(Pid1, ack),
+    ?WAIT_FOR_MSG({Pid2, {msg, Msg, Pid1}}),
+    ?WAIT_FOR_MSG({Pid1, ack}),
     timer:sleep(?TIMEOUT),
-    wait_for_msg(Pid2, {info, timeout}),
+    ?WAIT_FOR_MSG({Pid2, {info, timeout}}),
 
     %%
     %% Msg no await
     %%
     gen_nbs:cast(Pid1, {msg_no_await, Msg, Pid2, ?TIMEOUT}),
-    wait_for_msg(Pid2, {msg, Msg, Pid1}),
+    ?WAIT_FOR_MSG({Pid2, {msg, Msg, Pid1}}),
     timer:sleep(?TIMEOUT),
-    wait_for_msg(Pid1, fail),
+    ?WAIT_FOR_MSG({Pid1, fail}),
 
     %%
     %% Msg await timeout
     %%
     gen_nbs:cast(Pid1, {msg_await_timeout, ?TIMEOUT}),
     timer:sleep(?TIMEOUT),
-    wait_for_msg(Pid1, {info, timeout}),
+    ?WAIT_FOR_MSG({Pid1, {info, timeout}}),
 
     %%
     %% Manual ack
     %%
     gen_nbs:cast(Pid1, {msg_manual_ack, Msg, Pid2}),
-    wait_for_msg(Pid2, {msg, Msg, Pid1}),
+    ?WAIT_FOR_MSG({Pid2, {msg, Msg, Pid1}}),
     timer:sleep(2 * ?TIMEOUT),
-    wait_for_msg(Pid1, ack),
+    ?WAIT_FOR_MSG({Pid1, ack}),
 
     %%
     %% Manual fail
     %%
     gen_nbs:cast(Pid1, {msg_manual_fail, Msg, Pid2}),
-    wait_for_msg(Pid2, {msg, Msg, Pid1}),
+    ?WAIT_FOR_MSG({Pid2, {msg, Msg, Pid1}}),
     timer:sleep(?TIMEOUT),
-    wait_for_msg(Pid1, fail),
+    ?WAIT_FOR_MSG({Pid1, fail}),
 
     %%
     %% Multiple msgs
     %%
     gen_nbs:cast(Pid1, {msg_multiple, Msg, Pid2, ?TIMEOUT}),
-    wait_for_msg(Pid2, {msg, Msg, Pid1}),
-    wait_for_msg(Pid2, {msg, Msg, Pid1}),
-    wait_for_msg(Pid1, ack),
-    wait_for_msg(Pid1, ack),
+    ?WAIT_FOR_MSG({Pid2, {msg, Msg, Pid1}}),
+    ?WAIT_FOR_MSG({Pid2, {msg, Msg, Pid1}}),
+    ?WAIT_FOR_MSG({Pid1, ack}),
+    ?WAIT_FOR_MSG({Pid1, ack}),
 
     %%
     %% Post with no ack needed (unexisting_process)
     %%
     gen_nbs:cast(Pid1, {msg_no_ack, Msg, fake_name, infinity}),
-    wait_for_msg(Pid1, fail),
+    ?WAIT_FOR_MSG({Pid1, fail}),
 
     %%
     %% Post (globally registered process)
     %%
     gen_nbs:cast(Pid1, {msg_no_ack, Msg, {global, test_global_name}, infinity}),
-    wait_for_msg(Pid4, {msg, Msg, Pid1}),
+    ?WAIT_FOR_MSG({Pid4, {msg, Msg, Pid1}}),
 
     %%
     %% Post ("via mod" registered process)
     %%
     gen_nbs:cast(Pid1, {msg_no_ack, Msg, {via, global, test_global_name}, infinity}),
-    wait_for_msg(Pid4, {msg, Msg, Pid1}),
+    ?WAIT_FOR_MSG({Pid4, {msg, Msg, Pid1}}),
 
     %%
     %% Post (fully qualified name)
     %%
     gen_nbs:cast(Pid1, {msg_no_ack, Msg, {test_local_name, node()}, infinity}),
-    wait_for_msg(Pid3, {msg, Msg, Pid1}),
+    ?WAIT_FOR_MSG({Pid3, {msg, Msg, Pid1}}),
 
     gen_nbs:stop(Pid1),
     gen_nbs:stop(Pid2),
     gen_nbs:stop(Pid3),
     gen_nbs:stop(Pid4),
-    wait_for_exit(Pid1),
-    wait_for_exit(Pid2),
-    wait_for_exit(Pid3),
-    wait_for_exit(Pid4),
+    ?WAIT_FOR_EXIT(Pid1),
+    ?WAIT_FOR_EXIT(Pid2),
+    ?WAIT_FOR_EXIT(Pid3),
+    ?WAIT_FOR_EXIT(Pid4),
     ok.
 
 test_format_status(_Config) ->
@@ -553,31 +592,8 @@ test_format_status(_Config) ->
     gen_nbs:stop(Pid2),
     gen_nbs:stop(Pid3),
     gen_nbs:stop(Pid4),
-    wait_for_exit(Pid1),
-    wait_for_exit(Pid2),
-    wait_for_exit(Pid3),
-    wait_for_exit(Pid4).
-
-wait_for_msg(Pid, Msg) ->
-    receive
-        {Pid, Msg} ->
-            ok
-    after 5000 ->
-              ct:fail(timeout)
-    end.
-
-wait_for_down(Pid) ->
-    receive
-        {'DOWN', _, process, Pid, _} ->
-            ok
-    after 5000 ->
-              ct:fail(timeout)
-    end.
-wait_for_exit(Pid) ->
-    receive
-        {'EXIT', Pid, _} ->
-            ok
-    after 5000 ->
-              ct:fail(timeout)
-    end.
+    ?WAIT_FOR_EXIT(Pid1),
+    ?WAIT_FOR_EXIT(Pid2),
+    ?WAIT_FOR_EXIT(Pid3),
+    ?WAIT_FOR_EXIT(Pid4).
 

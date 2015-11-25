@@ -93,6 +93,7 @@
          stop/1, stop/3,
          cast/2, msg/2, msg/3,
          ack/1, fail/1,
+         ref/1,
          enter_loop/3, enter_loop/4, enter_loop/5, wake_hib/1]).
 
 %% System exports
@@ -155,6 +156,11 @@
 -define(CAST(Msg),      {'$gen_cast',   Msg}).
 -define(MSG(Tag, Msg),  {'$gen_msg',    Tag, Msg}).
 -define(FAIL(Ref),      {'$gen_fail',   Ref}).
+
+-define(OK_RET(State), {ok, State}).
+-define(TIMERS_RET(Timers), {timers, Timers}).
+-define(ACK_RET(Tag), {ack, Tag}).
+-define(AWAIT_RET(Await), {await, Await}).
 
 
 %%%  -----------------------------------------------------------------
@@ -225,6 +231,16 @@ fail(?TAG(From, Ref)) ->
     From ! ?FAIL(Ref),
     ok.
 
+%%
+%% Get ref from await
+%%
+
+ref({Ref, _Timer}) ->
+    Ref;
+
+ref(Ref) ->
+    Ref.
+
 %% -----------------------------------------------------------------
 %% Asynchronous broadcast, returns nothing, it's just send 'n' pray
 %%------------------------------------------------------------------
@@ -263,17 +279,22 @@ do_send(Dest, cast, Msg) ->
 
 do_send(Dest, cast, Msg, _) ->
     do_cmd_send(Dest, ?CAST(Msg));
-do_send(Dest, msg, Msg, infinity) ->
-    SName = monitor_suitable_name(Dest),
-    Ref = monitor(process, SName),
-    do_cmd_send(Dest, ?MSG({self(), Ref}, Msg)),
-    {Ref, make_ref()};
 do_send(Dest, msg, Msg, Timeout) ->
     SName = monitor_suitable_name(Dest),
     Ref = monitor(process, SName),
-    TimerRef = erlang:send_after(Timeout, self(), ?FAIL(Ref)),
+    TimerRef = case Timeout of
+                   infinity ->
+                       undefined;
+                   T ->
+                       erlang:send_after(T, self(), ?FAIL(Ref))
+               end,
     do_cmd_send(Dest, ?MSG({self(), Ref}, Msg)),
-    {Ref, TimerRef}.
+    case TimerRef of
+        undefined ->
+            Ref;
+        TRef ->
+            {Ref, TRef}
+    end.
 
 monitor_suitable_name(Pid) when is_pid(Pid) ->
     Pid;
@@ -416,11 +437,6 @@ unregister_name({via, Mod, Name}) ->
     _ = Mod:unregister_name(Name);
 unregister_name(Pid) when is_pid(Pid) ->
     Pid.
-
--define(OK_RET(State), {ok, State}).
--define(TIMERS_RET(Timers), {timers, Timers}).
--define(ACK_RET(Tag), {ack, Tag}).
--define(AWAIT_RET(Await), {await, Await}).
 
 %%%========================================================================
 %%% Internal functions
@@ -595,11 +611,11 @@ handle_common_reply(Reply, Msg, InnerState=#inner_state{timers=Timers}) ->
 update_timers([], Timers) ->
     Timers;
 update_timers(Await, Timers) when is_list(Await) ->
-    lists:foldl(fun({Ref, Timer}, Acc) ->
-                        maps:put(Ref, Timer, Acc) end,
-                Timers, Await);
+    lists:foldl(fun update_timers/2, Timers, Await);
 update_timers({Ref, Timer}, Timers) ->
-    maps:put(Ref, Timer, Timers).
+    maps:put(Ref, Timer, Timers);
+update_timers(_Ref, Timers) ->
+    Timers.
 
 
 %%-----------------------------------------------------------------

@@ -92,7 +92,7 @@
          multimsg/2, multimsg/3, multimsg/4,
          stop/1, stop/3,
          cast/2, msg/2, msg/3,
-         ack/1, fail/1,
+         ack/2, fail/1,
          ref/1,
          enter_loop/3, enter_loop/4, enter_loop/5, wake_hib/1]).
 
@@ -122,7 +122,7 @@
     {ok, NewState :: term(), timeout() | hibernate} |
     {stop, Reason :: term(), Reply :: term(), NewState :: term()} |
     {stop, Reason :: term(), NewState :: term()}.
--callback handle_ack(From :: {pid(), Tag :: term()}, State :: term()) ->
+-callback handle_ack(Ack :: term(), From :: {pid(), Tag :: term()}, State :: term()) ->
     {ok, NewState :: term()} |
     {ok, NewState :: term(), timeout() | hibernate} |
     {stop, Reason :: term(), NewState :: term()}.
@@ -152,7 +152,7 @@
 
 -define(TAG(What, Ref), {What, Ref}).
 
--define(ACK(Ref),       {'$gen_ack',    Ref}).
+-define(ACK(Ref, Ack),       {'$gen_ack',    Ref, Ack}).
 -define(CAST(Msg),      {'$gen_cast',   Msg}).
 -define(MSG(Tag, Msg),  {'$gen_msg',    Tag, Msg}).
 -define(FAIL(Ref),      {'$gen_fail',   Ref}).
@@ -223,8 +223,8 @@ msg(Dest, Msg, Timeout) ->
 %% Manual ack/fail
 %% -----------------------------------------------------------------
 
-ack(?TAG(From, Ref)) ->
-    From ! ?ACK(Ref),
+ack(?TAG(From, Ref), Ack) ->
+    From ! ?ACK(Ref, Ack),
     ok.
 
 fail(?TAG(From, Ref)) ->
@@ -513,7 +513,7 @@ try_dispatch(?FAIL(Ref), Mod, State, Timers) ->
             end,
             try_handle(Mod, handle_fail, [Ref, State], NTimers)
     end;
-try_dispatch(?ACK(Ref), Mod, State, Timers) ->
+try_dispatch(?ACK(Ref, Ack), Mod, State, Timers) ->
     true = demonitor(Ref),
     case maps:find(Ref, Timers) of
         error ->
@@ -526,7 +526,7 @@ try_dispatch(?ACK(Ref), Mod, State, Timers) ->
                 _ ->
                     erlang:cancel_timer(Timer)
             end,
-            try_handle(Mod, handle_ack, [Ref, State], NTimers)
+            try_handle(Mod, handle_ack, [Ack, Ref, State], NTimers)
     end;
 try_dispatch(Info, Mod, State, _Timers) ->
     try_handle(Mod, handle_info, [Info, State]).
@@ -588,13 +588,13 @@ handle_common_reply(Reply, Msg, InnerState=#inner_state{timers=Timers}) ->
             NInnerState = debug(?AWAIT_RET(Await),
                                 InnerState#inner_state{state=NState, timers=NTimers}),
             loop(NInnerState#inner_state{timeout=Time});
-        {ok, {ack, ?TAG(From, Ref)=Tag, NState}} ->
-            From ! ?ACK(Ref),
+        {ok, {ack, Ack, ?TAG(From, Ref)=Tag, NState}} ->
+            From ! ?ACK(Ref, Ack),
             NInnerState = debug(?ACK_RET(Tag),
                                 InnerState#inner_state{state=NState}),
             loop(NInnerState#inner_state{timeout=infinity});
-        {ok, {ack, ?TAG(From, Ref)=Tag, NState, Time}} ->
-            From ! ?ACK(Ref),
+        {ok, {ack, Ack, ?TAG(From, Ref)=Tag, NState, Time}} ->
+            From ! ?ACK(Ref, Ack),
             NInnerState = debug(?ACK_RET(Tag),
                                 InnerState#inner_state{state=NState}),
             loop(NInnerState#inner_state{timeout=Time});
@@ -672,9 +672,9 @@ debug(Msg, InnerState=#inner_state{name=Name,
 print_event(Dev, ?CAST(Msg), Name) ->
     io:format(Dev, "*DBG* ~p got cast ~p~n",
               [Name, Msg]);
-print_event(Dev, ?ACK(Ref), Name) ->
-    io:format(Dev, "*DBG* ~p got acknowledgement ~p~n",
-              [Name, Ref]);
+print_event(Dev, ?ACK(Ref, Ack), Name) ->
+    io:format(Dev, "*DBG* ~p got acknowledgement ~p from ~p~n",
+              [Name, Ack, Ref]);
 print_event(Dev, ?FAIL(Ref), Name) ->
     io:format(Dev, "*DBG* ~p message to ~p timed out~n",
               [Name, Ref]);

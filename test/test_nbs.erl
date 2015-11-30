@@ -3,11 +3,10 @@
 %%
 %% Gen_nbs exports
 %%
--export([init/1,
-         handle_cast/2,
+-export([init/1, handle_cast/2,
          handle_msg/3,
          handle_info/2,
-         handle_ack/2,
+         handle_ack/3,
          handle_fail/2,
          code_change/3,
          terminate/2]).
@@ -92,13 +91,13 @@ handle_cast(Msg, State={notify, Pid}) ->
 handle_msg({long_ack, Timeout, Msg}, F={From, _}, State={notify, Pid}) ->
     timer:sleep(Timeout),
     Pid ! {self(), {msg, Msg, From}},
-    {ack, F, State};
+    {ack, ok, F, State};
 handle_msg({timeout, Timeout, Msg}, F={From, _}, State={notify, Pid}) ->
     Pid ! {self(), {msg, Msg, From}},
-    {ack, F, State, Timeout};
+    {ack, ok, F, State, Timeout};
 handle_msg({manual_ack, Msg}, F={From, _}, State={notify, Pid}) ->
     Pid ! {self(), {msg, Msg, From}},
-    gen_nbs:ack(F),
+    gen_nbs:ack(F, ok),
     {ok, State};
 handle_msg({manual_fail, Msg}, F={From, _}, State={notify, Pid}) ->
     Pid ! {self(), {msg, Msg, From}},
@@ -106,12 +105,12 @@ handle_msg({manual_fail, Msg}, F={From, _}, State={notify, Pid}) ->
     {ok, State};
 handle_msg({ack, Msg}, F={From, _}, State={notify, Pid}) ->
     Pid ! {self(), {msg, Msg, From}},
-    {ack, F, State};
+    {ack, ok, F, State};
 handle_msg(Msg, {From, _}, State={notify, Pid}) ->
     Pid ! {self(), {msg, Msg, From}},
     {ok, State}.
 
-handle_ack(_Ref, State={notify, Pid}) ->
+handle_ack(ok, _Ref, State={notify, Pid}) ->
     Pid ! {self(), ack},
     {ok, State}.
 

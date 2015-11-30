@@ -588,12 +588,12 @@ handle_common_reply(Reply, Msg, InnerState=#inner_state{timers=Timers}) ->
             NInnerState = debug(?AWAIT_RET(Await),
                                 InnerState#inner_state{state=NState, timers=NTimers}),
             loop(NInnerState#inner_state{timeout=Time});
-        {ok, {ack, Ack, ?TAG(From, Ref)=Tag, NState}} ->
+        {ok, {ack, ?TAG(From, Ref)=Tag, Ack, NState}} ->
             From ! ?ACK(Ref, Ack),
             NInnerState = debug(?ACK_RET(Tag),
                                 InnerState#inner_state{state=NState}),
             loop(NInnerState#inner_state{timeout=infinity});
-        {ok, {ack, Ack, ?TAG(From, Ref)=Tag, NState, Time}} ->
+        {ok, {ack, ?TAG(From, Ref)=Tag, Ack, NState, Time}} ->
             From ! ?ACK(Ref, Ack),
             NInnerState = debug(?ACK_RET(Tag),
                                 InnerState#inner_state{state=NState}),

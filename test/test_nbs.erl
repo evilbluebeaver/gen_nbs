@@ -91,10 +91,10 @@ handle_cast(Msg, State={notify, Pid}) ->
 handle_msg({long_ack, Timeout, Msg}, F={From, _}, State={notify, Pid}) ->
     timer:sleep(Timeout),
     Pid ! {self(), {msg, Msg, From}},
-    {ack, ok, F, State};
+    {ack, F, ok, State};
 handle_msg({timeout, Timeout, Msg}, F={From, _}, State={notify, Pid}) ->
     Pid ! {self(), {msg, Msg, From}},
-    {ack, ok, F, State, Timeout};
+    {ack, F, ok, State, Timeout};
 handle_msg({manual_ack, Msg}, F={From, _}, State={notify, Pid}) ->
     Pid ! {self(), {msg, Msg, From}},
     gen_nbs:ack(F, ok),
@@ -105,7 +105,7 @@ handle_msg({manual_fail, Msg}, F={From, _}, State={notify, Pid}) ->
     {ok, State};
 handle_msg({ack, Msg}, F={From, _}, State={notify, Pid}) ->
     Pid ! {self(), {msg, Msg, From}},
-    {ack, ok, F, State};
+    {ack, F, ok, State};
 handle_msg(Msg, {From, _}, State={notify, Pid}) ->
     Pid ! {self(), {msg, Msg, From}},
     {ok, State}.

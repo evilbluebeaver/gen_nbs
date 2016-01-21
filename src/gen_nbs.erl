@@ -1,4 +1,4 @@
-%%
+
 %% %CopyrightBegin%
 %%
 %% Copyright Ericsson AB 1996-2014. All Rights Reserved.
@@ -37,8 +37,8 @@
 %%%
 %%%   handle_msg(Msg, {From, Tag}, State) Handles incoming messages
 %%%
-%%%    ==> {ack, State}
-%%%        {ack, State, Timeout}
+%%%    ==> {ack, To, Ack, State}
+%%%        {ack, To, Ack, State, Timeout}
 %%%        {await, Await, State}
 %%%        {await, Await, State, Timeout}
 %%%        {ok, State}
@@ -48,8 +48,8 @@
 %%%
 %%%   handle_fail({From, Tag}, State) handles fail of outgoing message
 %%%
-%%%    ==> {ack, State}
-%%%        {ack, State, Timeout}
+%%%    ==> {ack, To, Ack, State}
+%%%        {ack, To, Ack, State, Timeout}
 %%%        {await, Await, State}
 %%%        {await, Await, State, Timeout}
 %%%        {ok, State}
@@ -59,8 +59,8 @@
 %%%
 %%%   handle_ack({From, Tag}, State) handles successful acknowledgement of outgoing message
 %%%
-%%%    ==> {ack, State}
-%%%        {ack, State, Timeout}
+%%%    ==> {ack, To, Ack, State}
+%%%        {ack, To, Ack, State, Timeout}
 %%%        {await, Await, State}
 %%%        {await, Await, State, Timeout}
 %%%        {ok, State}
@@ -70,8 +70,8 @@
 %%%
 %%%   handle_info(Info, State) Info is e.g. {'EXIT', P, R}, {nodedown, N}, ...
 %%%
-%%%    ==> {ack, State}
-%%%        {ack, State, Timeout}
+%%%    ==> {ack, To, Ack, State}
+%%%        {ack, To, Ack, State, Timeout}
 %%%        {await, Await, State}
 %%%        {await, Await, State, Timeout}
 %%%        {ok, State}
@@ -116,23 +116,40 @@
     {stop, Reason :: term()} | ignore.
 -callback handle_msg(Message :: term(), From :: {pid(), reference()},
                       State :: term()) ->
-    {ack, To :: {pid(), reference()}, NewState :: term()} |
-    {ack, To :: {pid(), reference()}, NewState :: term(), timeout() | hibernate} |
+    {ack, To :: {pid(), reference()}, Ack :: term(), NewState :: term()} |
+    {ack, To :: {pid(), reference()}, Ack :: term(), NewState :: term(), timeout() | hibernate} |
+    {await, Await :: {reference(), reference()}, NewState :: term()} |
+    {await, Await :: {reference(), reference()}, NewState :: term(), timeout() | hibernate} |
     {ok, NewState :: term()} |
     {ok, NewState :: term(), timeout() | hibernate} |
     {stop, Reason :: term(), Reply :: term(), NewState :: term()} |
     {stop, Reason :: term(), NewState :: term()}.
 -callback handle_ack(Ack :: term(), From :: {pid(), Tag :: term()}, State :: term()) ->
+    {ack, To :: {pid(), reference()}, Ack :: term(), NewState :: term()} |
+    {ack, To :: {pid(), reference()}, Ack :: term(), NewState :: term(), timeout() | hibernate} |
+    {await, Await :: {reference(), reference()}, NewState :: term()} |
+    {await, Await :: {reference(), reference()}, NewState :: term(), timeout() | hibernate} |
     {ok, NewState :: term()} |
     {ok, NewState :: term(), timeout() | hibernate} |
+    {stop, Reason :: term(), Reply :: term(), NewState :: term()} |
     {stop, Reason :: term(), NewState :: term()}.
 -callback handle_fail(From :: {pid(), Tag :: term()}, State :: term()) ->
+    {ack, To :: {pid(), reference()}, Ack :: term(), NewState :: term()} |
+    {ack, To :: {pid(), reference()}, Ack :: term(), NewState :: term(), timeout() | hibernate} |
+    {await, Await :: {reference(), reference()}, NewState :: term()} |
+    {await, Await :: {reference(), reference()}, NewState :: term(), timeout() | hibernate} |
     {ok, NewState :: term()} |
     {ok, NewState :: term(), timeout() | hibernate} |
+    {stop, Reason :: term(), Reply :: term(), NewState :: term()} |
     {stop, Reason :: term(), NewState :: term()}.
 -callback handle_info(Info :: timeout | term(), State :: term()) ->
+    {ack, To :: {pid(), reference()}, Ack :: term(), NewState :: term()} |
+    {ack, To :: {pid(), reference()}, Ack :: term(), NewState :: term(), timeout() | hibernate} |
+    {await, Await :: {reference(), reference()}, NewState :: term()} |
+    {await, Await :: {reference(), reference()}, NewState :: term(), timeout() | hibernate} |
     {ok, NewState :: term()} |
     {ok, NewState :: term(), timeout() | hibernate} |
+    {stop, Reason :: term(), Reply :: term(), NewState :: term()} |
     {stop, Reason :: term(), NewState :: term()}.
 -callback terminate(Reason :: (normal | shutdown | {shutdown, term()} |
                                term()),

@@ -58,31 +58,31 @@ handle_cast({timeout, Timeout}, State) ->
 handle_cast(stop, State) ->
     {stop, normal, State};
 handle_cast({msg_multiple, Msg, To, Timeout}, State) ->
-    Await1 = gen_nbs:msg(To, {ack, Msg}, Timeout),
-    Await2 = gen_nbs:msg(To, {ack, Msg}, Timeout),
+    Await1 = gen_nbs:msg(To, {ack, Msg}, tag, Timeout),
+    Await2 = gen_nbs:msg(To, {ack, Msg}, tag, Timeout),
     {await, [Await1, Await2], State};
 handle_cast({msg_no_ack, Msg, To, Timeout}, State) ->
-    Await = gen_nbs:msg(To, Msg, Timeout),
+    Await = gen_nbs:msg(To, Msg, tag, Timeout),
     {await, Await, State};
 handle_cast({msg_no_await, Msg, To, Timeout}, State) ->
-    _Await = gen_nbs:msg(To, Msg, Timeout),
+    _Await = gen_nbs:msg(To, Msg, tag, Timeout),
     {ok, State};
 handle_cast({msg_await_timeout, Timeout}, State) ->
     {await, [], State, Timeout};
 handle_cast({msg_manual_ack, Msg, To}, State) ->
-    Await = gen_nbs:msg(To, {manual_ack, Msg}),
+    Await = gen_nbs:msg(To, {manual_ack, Msg}, tag),
     {await, Await, State};
 handle_cast({msg_manual_fail, Msg, To}, State) ->
-    Await = gen_nbs:msg(To, {manual_fail, Msg}),
+    Await = gen_nbs:msg(To, {manual_fail, Msg}, tag),
     {await, Await, State};
 handle_cast({msg_ack, Msg, To}, State) ->
-    Await = gen_nbs:msg(To, {ack, Msg}),
+    Await = gen_nbs:msg(To, {ack, Msg}, tag),
     {await, Await, State};
 handle_cast({msg_long_ack, Msg, To, Timeout}, State) ->
-    Await = gen_nbs:msg(To, {long_ack, Timeout, Msg}, Timeout),
+    Await = gen_nbs:msg(To, {long_ack, Timeout, Msg}, tag, Timeout),
     {await, Await, State};
 handle_cast({msg_ack_timeout, Msg, To, Timeout}, State) ->
-    Await = gen_nbs:msg(To, {timeout, Timeout, Msg}, Timeout),
+    Await = gen_nbs:msg(To, {timeout, Timeout, Msg}, tag, Timeout),
     {await, Await, State};
 handle_cast(Msg, State={notify, Pid}) ->
     Pid ! {self(), {cast, Msg}},
@@ -110,11 +110,11 @@ handle_msg(Msg, {From, _}, State={notify, Pid}) ->
     Pid ! {self(), {msg, Msg, From}},
     {ok, State}.
 
-handle_ack(ok, _Ref, State={notify, Pid}) ->
+handle_ack(ok, tag, State={notify, Pid}) ->
     Pid ! {self(), ack},
     {ok, State}.
 
-handle_fail(_Ref, State={notify, Pid}) ->
+handle_fail(tag, State={notify, Pid}) ->
     Pid ! {self(), fail},
     {ok, State}.
 

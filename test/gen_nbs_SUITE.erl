@@ -27,7 +27,6 @@
          test_info/1,
          test_msg/1,
          test_send/1,
-         test_ref/1,
          test_misc/1,
          test_format_status/1,
          test_error/1]).
@@ -60,7 +59,7 @@
 %% CT functions
 %%
 groups() ->
-    [{messages, [], [test_cast, test_info, test_msg, test_misc, test_error, test_send, test_ref, test_abcast, test_multimsg]},
+    [{messages, [], [test_cast, test_info, test_msg, test_misc, test_error, test_send, test_abcast, test_multimsg]},
      {enter_loop, [], [test_enter_loop, test_enter_loop_local, test_enter_loop_global, test_enter_loop_via]}].
 
 all() ->
@@ -336,14 +335,14 @@ test_abcast(_Config) ->
 
 test_multimsg(_Config) ->
     {ok, Pid} = gen_nbs:start_link({local, test_name}, ?TEST_MODULE, {notify, self()}, []),
-    gen_nbs:multimsg(test_name, message),
+    gen_nbs:multimsg(test_name, message, tag),
     Self = self(),
     ?WAIT_FOR_MSG({Pid, {msg, message, Self}}),
-    gen_nbs:multimsg([node()], test_name, message),
+    gen_nbs:multimsg([node()], test_name, message, tag),
     ?WAIT_FOR_MSG({Pid, {msg, message, Self}}),
-    gen_nbs:multimsg(test_name, message, infinity),
+    gen_nbs:multimsg(test_name, message, tag, infinity),
     ?WAIT_FOR_MSG({Pid, {msg, message, Self}}),
-    gen_nbs:multimsg([node()], test_name, message, infinity),
+    gen_nbs:multimsg([node()], test_name, message, tag, infinity),
     ?WAIT_FOR_MSG({Pid, {msg, message, Self}}),
     gen_nbs:stop(Pid),
     Node = node(),
@@ -428,26 +427,6 @@ test_send(_Config) ->
     %% Fake node send
     gen_nbs:cast({test_name, fake_node}, message).
 
-test_ref(_Config) ->
-    {ok, Pid} = gen_nbs:start_link(?TEST_MODULE, {notify, self()}, [{debug, [trace]}]),
-    Ref1 = gen_nbs:ref(gen_nbs:msg(Pid, message, ?TIMEOUT)),
-    Self = self(),
-
-    ?WAIT_FOR_MSG({Pid, {msg, message, Self}}),
-    timer:sleep(?TIMEOUT),
-    ?WAIT_FOR_MSG({'$gen_fail', Ref1}),
-
-    _Ref2 = gen_nbs:ref(gen_nbs:msg(Pid, message, infinity)),
-    Self = self(),
-    ?WAIT_FOR_MSG({Pid, {msg, message, Self}}),
-
-    gen_nbs:stop(Pid),
-    ?WAIT_FOR_DOWN(Pid),
-    ?WAIT_FOR_DOWN(Pid),
-    ?WAIT_FOR_EXIT(Pid).
-
-
-
 test_msg(_Config) ->
     {ok, Pid1} = gen_nbs:start_link(?TEST_MODULE, {notify, self()}, [{debug, [trace]}]),
     {ok, Pid2} = gen_nbs:start_link(?TEST_MODULE, {notify, self()}, [{debug, [trace]}]),
@@ -507,8 +486,6 @@ test_msg(_Config) ->
     %%
     gen_nbs:cast(Pid1, {msg_no_await, Msg, Pid2, ?TIMEOUT}),
     ?WAIT_FOR_MSG({Pid2, {msg, Msg, Pid1}}),
-    timer:sleep(?TIMEOUT),
-    ?WAIT_FOR_MSG({Pid1, fail}),
 
     %%
     %% Msg await timeout

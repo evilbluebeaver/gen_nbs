@@ -68,9 +68,9 @@
     {stop, Reason :: term()} | ignore.
 -callback handle_msg(Message :: term(), From :: from(), State :: term()) ->
     callback_result().
--callback handle_ack(Ack :: term(), From :: from(), State :: term()) ->
+-callback handle_ack(Ack :: term(), Tag :: term(), State :: term()) ->
     callback_result().
--callback handle_fail(From :: from(), State :: term()) ->
+-callback handle_fail(Tag :: term(), State :: term()) ->
     callback_result().
 -callback handle_info(Info :: timeout | term(), State :: term()) ->
     callback_result().

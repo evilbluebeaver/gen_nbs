@@ -46,7 +46,6 @@
 -type reg_name() :: {local, atom()} | {global, atom()} | {via, atom(), term()}.
 -type dest() :: pid() | atom() | {atom(), atom()} | {global, atom()} | {via, atom(), term()}.
 -type options() :: [atom() | tuple()].
--type start_result() :: {ok, pid()} | {error, term()} | {error, {already_started, pid()}}.
 -type from() :: {pid(), reference()}.
 -type await() :: {reference(), reference() | undefined, term()}.
 -type callback_result() ::
@@ -59,6 +58,7 @@
     {stop, Reason :: term(), Reply :: term(), NewState :: term()} |
     {stop, Reason :: term(), NewState :: term()}.
 
+-export_type([await/0]).
 %%%=========================================================================
 %%%  Callback API
 %%%=========================================================================
@@ -120,19 +120,23 @@
 %%%          {error, Reason}
 %%% -----------------------------------------------------------------
 
--spec start(Mod :: atom(), Args :: term(), Options :: options()) -> start_result().
+-spec start(Mod :: atom(), Args :: term(), Options :: options()) ->
+    {ok, pid()} | {error, term()}.
 start(Mod, Args, Options) ->
     gen:start(?MODULE, nolink, Mod, Args, Options).
 
--spec start(Name :: reg_name(), Mod :: atom(), Args :: term(), Options :: options()) -> start_result().
+-spec start(Name :: reg_name(), Mod :: atom(), Args :: term(), Options :: options()) ->
+    {ok, pid()} | {error, term()}.
 start(Name, Mod, Args, Options) ->
     gen:start(?MODULE, nolink, Name, Mod, Args, Options).
 
--spec start_link(Mod :: atom(), Args :: term(), Options :: options()) -> start_result().
+-spec start_link(Mod :: atom(), Args :: term(), Options :: options()) ->
+    {ok, pid()} | {error, term()}.
 start_link(Mod, Args, Options) ->
     gen:start(?MODULE, link, Mod, Args, Options).
 
--spec start_link(Name :: reg_name(), Mod :: atom(), Args :: term(), Options :: options()) -> start_result().
+-spec start_link(Name :: reg_name(), Mod :: atom(), Args :: term(), Options :: options()) ->
+    {ok, pid()} | {error, term()}.
 start_link(Name, Mod, Args, Options) ->
     gen:start(?MODULE, link, Name, Mod, Args, Options).
 

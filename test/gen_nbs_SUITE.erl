@@ -435,6 +435,19 @@ test_msg(_Config) ->
     Msg = message,
 
     %%
+    %% Fail
+    %%
+    gen_nbs:cast(Pid1, {fail, Pid2}),
+    ?WAIT_FOR_MSG({Pid2, {fail, Pid1}}),
+    ?WAIT_FOR_MSG({Pid1, fail}),
+
+    %%
+    %% Fail (timeout)
+    %%
+    gen_nbs:cast(Pid1, {fail, Pid2, ?TIMEOUT}),
+    ?WAIT_FOR_MSG({Pid2, {fail, Pid1}}),
+    ?WAIT_FOR_MSG({Pid1, fail}),
+    %%
     %% No ack
     %%
     gen_nbs:cast(Pid1, {msg_no_ack, Msg, Pid2, ?TIMEOUT}),

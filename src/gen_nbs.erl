@@ -49,6 +49,8 @@
 -type from() :: {pid(), reference()}.
 -type await() :: {reference(), reference() | undefined, term()}.
 -type callback_result() ::
+    {fail, To :: from(), NewState :: term()} |
+    {fail, To :: from(), NewState :: term(), timeout()} |
     {ack, To :: from(), Ack :: term(), NewState :: term()} |
     {ack, To :: from(), Ack :: term(), NewState :: term(), timeout() | hibernate} |
     {await, Await :: {reference(), reference()}, NewState :: term()} |
@@ -100,6 +102,7 @@
 -define(OK_RET(State),      {ok, State}).
 -define(TIMERS_RET(Timers), {timers, Timers}).
 -define(ACK_RET(Tag),       {ack, Tag}).
+-define(FAIL_RET(Tag),      {fail, Tag}).
 -define(AWAIT_RET(Await),   {await, Await}).
 
 
@@ -554,6 +557,16 @@ handle_common_reply(Reply, Msg, InnerState=#inner_state{timers=Timers}) ->
             NInnerState = debug(?ACK_RET(Tag),
                                 InnerState#inner_state{state=NState}),
             loop(NInnerState#inner_state{timeout=Time});
+        {ok, {fail, ?FROM(From, Ref)=Tag, NState}} ->
+            From ! ?FAIL(Ref),
+            NInnerState = debug(?FAIL_RET(Tag),
+                                InnerState#inner_state{state=NState}),
+            loop(NInnerState#inner_state{timeout=infinity});
+        {ok, {fail, ?FROM(From, Ref)=Tag, NState, Time}} ->
+            From ! ?FAIL(Ref),
+            NInnerState = debug(?FAIL_RET(Tag),
+                                InnerState#inner_state{state=NState}),
+            loop(NInnerState#inner_state{timeout=Time});
         {timers, NTimers, NReply} ->
             NInnerState = debug(?TIMERS_RET(NTimers),
                                 InnerState#inner_state{timers=NTimers}),
@@ -641,6 +654,8 @@ print_event(Dev, ?TIMERS_RET(Timers), Name) ->
     io:format(Dev, "*DBG* ~p new timers ~p~n", [Name, Timers]);
 print_event(Dev, ?ACK_RET(Tag), Name) ->
     io:format(Dev, "*DBG* ~p sent acknowledgement to ~p~n", [Name, Tag]);
+print_event(Dev, ?FAIL_RET(Tag), Name) ->
+    io:format(Dev, "*DBG* ~p sent fail to ~p~n", [Name, Tag]);
 print_event(Dev, ?AWAIT_RET(Await), Name) ->
     io:format(Dev, "*DBG* ~p  await for ~p~n", [Name, Await]);
 print_event(Dev, Msg, Name) ->

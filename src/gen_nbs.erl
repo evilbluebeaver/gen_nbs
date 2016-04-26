@@ -25,7 +25,7 @@
          multimsg/3, multimsg/4, multimsg/5,
          stop/1, stop/3,
          cast/2, msg/3, msg/4,
-         ack/2, fail/1,
+         await/1, ack/2, fail/1,
          enter_loop/3, enter_loop/4, enter_loop/5, wake_hib/1]).
 
 %% System exports
@@ -39,6 +39,7 @@
 %% Internal exports
 -export([init_it/6]).
 
+-define(DEFAULT_TIMEOUT, 5000).
 
 %%%=========================================================================
 %%% Types specification
@@ -171,7 +172,7 @@ cast(Dest, Msg) ->
 
 -spec msg(Dest :: dest(), Msg :: term(), Tag :: term()) -> await().
 msg(Dest, Msg, Tag) ->
-    msg(Dest, Msg, Tag, 5000).
+    msg(Dest, Msg, Tag, ?DEFAULT_TIMEOUT).
 -spec msg(Dest :: dest(), Msg :: term(), Tag :: term(), Timeout :: timeout()) -> await().
 msg(Dest, Msg, Tag, Timeout) ->
     do_send(Dest, msg, {Msg, Tag}, Timeout).
@@ -191,6 +192,51 @@ fail(?FROM(From, Ref)) ->
     ok.
 
 %% -----------------------------------------------------------------
+%% Expects the results without having to implement a gen_nbs behaviour
+%% -----------------------------------------------------------------
+
+-spec await(Awaits :: await() | [await()]) -> [term()].
+await(Awaits) when is_list(Awaits) ->
+    do_receive(Awaits);
+
+await(Await) ->
+    do_receive([Await]).
+
+do_receive(Awaits) ->
+    do_receive(Awaits, [], []).
+
+do_receive([], Results, Failed) ->
+    {Results, Failed};
+
+do_receive([?AWAIT(Ref, Timer, Tag) | Awaits], Results, Failed) ->
+    receive
+        ?ACK(Ref, Ack) ->
+            clean_ref(Ref, Timer),
+            do_receive(Awaits, [{Tag, Ack} | Results], Failed)
+    after 0 ->
+              receive
+                  ?FAIL(Ref) ->
+                      clean_ref(Ref, Timer),
+                      do_receive(Awaits, Results, [Tag | Failed]);
+                  {'DOWN', Ref, process, _Pid, _Info} ->
+                      clean_ref(Ref, Timer),
+                      do_receive(Awaits, Results, [Tag | Failed])
+              end
+    end.
+
+clean_ref(Ref, Timer) ->
+    erlang:cancel_timer(Timer),
+    erlang:demonitor(Ref),
+    receive
+        ?FAIL(Ref) ->
+            ok;
+        {'DOWN', Ref, process, _Pid, _Info} ->
+            ok
+    after 0 ->
+              ok
+    end.
+
+%% -----------------------------------------------------------------
 %% Asynchronous broadcast, returns nothing, it's just send 'n' pray
 %%------------------------------------------------------------------
 -spec abcast(Name :: dest(), Msg :: term()) -> abcast.
@@ -200,7 +246,6 @@ abcast(Name, Msg) when is_atom(Name) ->
 -spec abcast(Nodes :: [atom()], Name :: atom(), Msg :: term()) -> abcast.
 abcast(Nodes, Name, Msg) when is_list(Nodes), is_atom(Name) ->
     do_abcast(Nodes, Name, Msg).
-
 
 -spec multimsg(Name :: dest(), Msg :: term(), Tag :: term()) -> [await()].
 multimsg(Name, Msg, Tag) when is_atom(Name) ->
@@ -223,7 +268,7 @@ do_abcast(Nodes, Name, Msg) ->
     abcast.
 
 do_multimsg(Nodes, Name, Type, Msg) ->
-    do_multimsg(Nodes, Name, Type, Msg, 5000).
+    do_multimsg(Nodes, Name, Type, Msg, ?DEFAULT_TIMEOUT).
 do_multimsg(Nodes, Name, Type, Msg, Timeout) ->
     do_multimsg(Nodes, Name, Type, Msg, Timeout, []).
 do_multimsg([Node|Nodes], Name, Type, Msg, Timeout, Result) when is_atom(Node) ->

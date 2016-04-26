@@ -215,6 +215,9 @@ do_receive([?AWAIT(Ref, Timer, Tag) | Awaits], Results, Failed) ->
             do_receive(Awaits, [{Tag, Ack} | Results], Failed)
     after 0 ->
               receive
+                  ?ACK(Ref, Ack) ->
+                      clean_ref(Ref, Timer),
+                      do_receive(Awaits, [{Tag, Ack} | Results], Failed);
                   ?FAIL(Ref) ->
                       clean_ref(Ref, Timer),
                       do_receive(Awaits, Results, [Tag | Failed]);

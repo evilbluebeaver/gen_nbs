@@ -39,6 +39,7 @@
 %% Internal exports
 -export([init_it/6]).
 
+-define(DEFAULT_TIMEOUT, 5000).
 
 %%%=========================================================================
 %%% Types specification
@@ -171,7 +172,7 @@ cast(Dest, Msg) ->
 
 -spec msg(Dest :: dest(), Msg :: term(), Tag :: term()) -> await().
 msg(Dest, Msg, Tag) ->
-    msg(Dest, Msg, Tag, 5000).
+    msg(Dest, Msg, Tag, ?DEFAULT_TIMEOUT).
 -spec msg(Dest :: dest(), Msg :: term(), Tag :: term(), Timeout :: timeout()) -> await().
 msg(Dest, Msg, Tag, Timeout) ->
     do_send(Dest, msg, {Msg, Tag}, Timeout).
@@ -201,7 +202,6 @@ abcast(Name, Msg) when is_atom(Name) ->
 abcast(Nodes, Name, Msg) when is_list(Nodes), is_atom(Name) ->
     do_abcast(Nodes, Name, Msg).
 
-
 -spec multimsg(Name :: dest(), Msg :: term(), Tag :: term()) -> [await()].
 multimsg(Name, Msg, Tag) when is_atom(Name) ->
     do_multimsg([node() | nodes()], Name, msg, {Msg, Tag}).
@@ -223,7 +223,7 @@ do_abcast(Nodes, Name, Msg) ->
     abcast.
 
 do_multimsg(Nodes, Name, Type, Msg) ->
-    do_multimsg(Nodes, Name, Type, Msg, 5000).
+    do_multimsg(Nodes, Name, Type, Msg, ?DEFAULT_TIMEOUT).
 do_multimsg(Nodes, Name, Type, Msg, Timeout) ->
     do_multimsg(Nodes, Name, Type, Msg, Timeout, []).
 do_multimsg([Node|Nodes], Name, Type, Msg, Timeout, Result) when is_atom(Node) ->

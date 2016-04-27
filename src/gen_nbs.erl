@@ -54,8 +54,8 @@
     {fail, To :: from(), NewState :: term(), timeout()} |
     {ack, To :: from(), Ack :: term(), NewState :: term()} |
     {ack, To :: from(), Ack :: term(), NewState :: term(), timeout() | hibernate} |
-    {await, Await :: {reference(), reference()}, NewState :: term()} |
-    {await, Await :: {reference(), reference()}, NewState :: term(), timeout() | hibernate} |
+    {await, Await :: await(), NewState :: term()} |
+    {await, Await :: await(), NewState :: term(), timeout() | hibernate} |
     {ok, NewState :: term()} |
     {ok, NewState :: term(), timeout() | hibernate} |
     {stop, Reason :: term(), Reply :: term(), NewState :: term()} |
@@ -195,7 +195,16 @@ fail(?FROM(From, Ref)) ->
 %% Expects the results without having to implement a gen_nbs behaviour
 %% -----------------------------------------------------------------
 
--spec await(Awaits :: await() | [await()]) -> [term()].
+-define(CLEAN(Ref),
+    receive
+        ?FAIL(Ref) ->
+            ok;
+        {'DOWN', Ref, process, _Pid, _Info} ->
+            ok
+    after 0 ->
+              ok
+    end).
+-spec await(Awaits :: await() | [await()]) -> {[{term(), term()}], [term()]}.
 await(Awaits) when is_list(Awaits) ->
     do_receive(Awaits);
 
@@ -230,14 +239,7 @@ do_receive([?AWAIT(Ref, Timer, Tag) | Awaits], Results, Failed) ->
 clean_ref(Ref, Timer) ->
     erlang:cancel_timer(Timer),
     erlang:demonitor(Ref),
-    receive
-        ?FAIL(Ref) ->
-            ok;
-        {'DOWN', Ref, process, _Pid, _Info} ->
-            ok
-    after 0 ->
-              ok
-    end.
+    ?CLEAN(Ref).
 
 %% -----------------------------------------------------------------
 %% Asynchronous broadcast, returns nothing, it's just send 'n' pray

@@ -27,6 +27,7 @@
          test_info/1,
          test_msg/1,
          test_send/1,
+         test_await/1,
          test_misc/1,
          test_format_status/1,
          test_error/1]).
@@ -66,6 +67,7 @@ all() ->
     [test_start,
      {group, enter_loop},
      {group, messages},
+     test_await,
      test_format_status,
      test_sys].
 
@@ -426,6 +428,15 @@ test_send(_Config) ->
 
     %% Fake node send
     gen_nbs:cast({test_name, fake_node}, message).
+
+test_await(_Config) ->
+    {ok, Pid1} = gen_nbs:start(?TEST_MODULE, [], []),
+    {[], [tag1]} = gen_nbs:await(gen_nbs:msg(Pid1, {fail}, tag1)),
+    {[{tag2, ok}, {tag1, ok}], []} = gen_nbs:await([gen_nbs:msg(Pid1, {ack, ok}, tag1),
+                                            gen_nbs:msg(Pid1, {ack, ok}, tag2)]),
+    {[], [tag1]} = gen_nbs:await(gen_nbs:msg(Pid1, {down}, tag1)),
+    {[], [tag1]} = gen_nbs:await(gen_nbs:msg(Pid1, {down}, tag1, 0)),
+    ok.
 
 test_msg(_Config) ->
     {ok, Pid1} = gen_nbs:start_link(?TEST_MODULE, {notify, self()}, [{debug, [trace]}]),

@@ -120,7 +120,13 @@ handle_msg({ack, Msg}, F={From, _}, State={notify, Pid}) ->
     {ack, F, ok, State};
 handle_msg(Msg, {From, _}, State={notify, Pid}) ->
     Pid ! {self(), {msg, Msg, From}},
-    {ok, State}.
+    {ok, State};
+handle_msg({fail}, From, State) ->
+    {fail, From, State};
+handle_msg({down}, _From, State) ->
+    {stop, down, State};
+handle_msg({ack, Res}, From, State) ->
+    {ack, From, Res, State}.
 
 handle_ack(ok, tag, State={notify, Pid}) ->
     Pid ! {self(), ack},

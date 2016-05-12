@@ -7,7 +7,7 @@
          handle_msg/3,
          handle_info/2,
          handle_ack/3,
-         handle_fail/2,
+         handle_fail/3,
          code_change/3,
          terminate/2]).
 
@@ -96,10 +96,10 @@ handle_cast(Msg, State={notify, Pid}) ->
 
 handle_msg({fail}, F={From, _}, State={notify, Pid}) ->
     Pid ! {self(), {fail, From}},
-    {fail, F, State};
+    {fail, F, fail, State};
 handle_msg({fail, Timeout}, F={From, _}, State={notify, Pid}) ->
     Pid ! {self(), {fail, From}},
-    {fail, F, State, Timeout};
+    {fail, F, fail, State, Timeout};
 handle_msg({long_ack, Timeout, Msg}, F={From, _}, State={notify, Pid}) ->
     timer:sleep(Timeout),
     Pid ! {self(), {msg, Msg, From}},
@@ -113,7 +113,7 @@ handle_msg({manual_ack, Msg}, F={From, _}, State={notify, Pid}) ->
     {ok, State};
 handle_msg({manual_fail, Msg}, F={From, _}, State={notify, Pid}) ->
     Pid ! {self(), {msg, Msg, From}},
-    gen_nbs:fail(F),
+    gen_nbs:fail(F, fail),
     {ok, State};
 handle_msg({ack, Msg}, F={From, _}, State={notify, Pid}) ->
     Pid ! {self(), {msg, Msg, From}},
@@ -122,7 +122,7 @@ handle_msg(Msg, {From, _}, State={notify, Pid}) ->
     Pid ! {self(), {msg, Msg, From}},
     {ok, State};
 handle_msg({fail}, From, State) ->
-    {fail, From, State};
+    {fail, From, fail, State};
 handle_msg({down}, _From, State) ->
     {stop, down, State};
 handle_msg({ack, Res}, From, State) ->
@@ -132,7 +132,7 @@ handle_ack(ok, tag, State={notify, Pid}) ->
     Pid ! {self(), ack},
     {ok, State}.
 
-handle_fail(tag, State={notify, Pid}) ->
+handle_fail(tag, _Reason, State={notify, Pid}) ->
     Pid ! {self(), fail},
     {ok, State}.
 

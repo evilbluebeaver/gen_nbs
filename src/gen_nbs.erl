@@ -25,7 +25,7 @@
          multimsg/3, multimsg/4, multimsg/5,
          stop/1, stop/3,
          cast/2, msg/3, msg/4,
-         await/1, ack/2, fail/1,
+         await/1, ack/2, fail/2,
          enter_loop/3, enter_loop/4, enter_loop/5, wake_hib/1]).
 
 %% System exports
@@ -50,8 +50,8 @@
 -type from() :: {pid(), reference()}.
 -type await() :: {reference(), reference() | undefined, term()}.
 -type callback_result() ::
-    {fail, To :: from(), NewState :: term()} |
-    {fail, To :: from(), NewState :: term(), timeout()} |
+    {fail, To :: from(), Reason :: term(), NewState :: term()} |
+    {fail, To :: from(), Reason :: term(), NewState :: term(), timeout()} |
     {ack, To :: from(), Ack :: term(), NewState :: term()} |
     {ack, To :: from(), Ack :: term(), NewState :: term(), timeout() | hibernate} |
     {await, Await :: await(), NewState :: term()} |
@@ -73,7 +73,7 @@
     callback_result().
 -callback handle_ack(Ack :: term(), Tag :: term(), State :: term()) ->
     callback_result().
--callback handle_fail(Tag :: term(), State :: term()) ->
+-callback handle_fail(Tag :: term(), Reason :: term(), State :: term()) ->
     callback_result().
 -callback handle_info(Info :: timeout | term(), State :: term()) ->
     callback_result().
@@ -95,10 +95,10 @@
 -define(FROM(What, Ref), {What, Ref}).
 -define(AWAIT(Ref, Timer, Tag), {Ref, Timer, Tag}).
 
--define(ACK(Ref, Ack),  {'$gen_ack',    Ref, Ack}).
--define(CAST(Msg),      {'$gen_cast',   Msg}).
--define(MSG(From, Msg), {'$gen_msg',    From, Msg}).
--define(FAIL(Ref),      {'$gen_fail',   Ref}).
+-define(ACK(Ref, Ack),      {'$gen_ack',  Ref, Ack}).
+-define(CAST(Msg),          {'$gen_cast', Msg}).
+-define(MSG(From, Msg),     {'$gen_msg',  From, Msg}).
+-define(FAIL(Ref, Reason),  {'$gen_fail', Ref, Reason}).
 
 -define(OK_RET(State),      {ok, State}).
 -define(TIMERS_RET(Timers), {timers, Timers}).
@@ -186,9 +186,9 @@ ack(?FROM(From, Ref), Ack) ->
     From ! ?ACK(Ref, Ack),
     ok.
 
--spec fail(From :: from()) -> ok.
-fail(?FROM(From, Ref)) ->
-    From ! ?FAIL(Ref),
+-spec fail(From :: from(), Reason :: term()) -> ok.
+fail(?FROM(From, Ref), Reason) ->
+    From ! ?FAIL(Ref, Reason),
     ok.
 
 %% -----------------------------------------------------------------
@@ -197,7 +197,7 @@ fail(?FROM(From, Ref)) ->
 
 -define(CLEAN(Ref),
     receive
-        ?FAIL(Ref) ->
+        ?FAIL(Ref, _) ->
             ok;
         {'DOWN', Ref, process, _Pid, _Info} ->
             ok
@@ -227,12 +227,12 @@ do_receive([?AWAIT(Ref, Timer, Tag) | Awaits], Results, Failed) ->
                   ?ACK(Ref, Ack) ->
                       clean_ref(Ref, Timer),
                       do_receive(Awaits, [{Tag, Ack} | Results], Failed);
-                  ?FAIL(Ref) ->
+                  ?FAIL(Ref, Reason) ->
                       clean_ref(Ref, Timer),
-                      do_receive(Awaits, Results, [Tag | Failed]);
+                      do_receive(Awaits, Results, [{Tag, Reason} | Failed]);
                   {'DOWN', Ref, process, _Pid, _Info} ->
                       clean_ref(Ref, Timer),
-                      do_receive(Awaits, Results, [Tag | Failed])
+                      do_receive(Awaits, Results, [{Tag, down} | Failed])
               end
     end.
 
@@ -301,7 +301,7 @@ do_send(Dest, msg, {Msg, Tag}, Timeout) ->
                    infinity ->
                        undefined;
                    T ->
-                       erlang:send_after(T, self(), ?FAIL(Ref))
+                       erlang:send_after(T, self(), ?FAIL(Ref, timeout))
                end,
     From = ?FROM(self(), Ref),
     do_cmd_send(Dest, ?MSG(From, Msg)),
@@ -502,12 +502,12 @@ decode_msg(Msg, InnerState=#inner_state{parent=Parent,
 %% ---------------------------------------------------
 
 try_dispatch({'DOWN', Ref, process, _Pid, _Info}, Mod, State, Timers) ->
-    try_dispatch(?FAIL(Ref), Mod, State, Timers);
+    try_dispatch(?FAIL(Ref, down), Mod, State, Timers);
 try_dispatch(?CAST(Msg), Mod, State, _Timers) ->
     try_handle(Mod, handle_cast, [Msg, State]);
 try_dispatch(?MSG(From, Msg), Mod, State, _Timers) ->
     try_handle(Mod, handle_msg, [Msg, From, State]);
-try_dispatch(?FAIL(Ref), Mod, State, Timers) ->
+try_dispatch(?FAIL(Ref, Reason), Mod, State, Timers) ->
     true = demonitor(Ref),
     case maps:find(Ref, Timers) of
         error ->
@@ -520,7 +520,7 @@ try_dispatch(?FAIL(Ref), Mod, State, Timers) ->
                 _ ->
                     erlang:cancel_timer(Timer)
             end,
-            try_handle(Mod, handle_fail, [Tag, State], NTimers)
+            try_handle(Mod, handle_fail, [Tag, Reason, State], NTimers)
     end;
 try_dispatch(?ACK(Ref, Ack), Mod, State, Timers) ->
     true = demonitor(Ref),
@@ -607,13 +607,13 @@ handle_common_reply(Reply, Msg, InnerState=#inner_state{timers=Timers}) ->
             NInnerState = debug(?ACK_RET(Tag),
                                 InnerState#inner_state{state=NState}),
             loop(NInnerState#inner_state{timeout=Time});
-        {ok, {fail, ?FROM(From, Ref)=Tag, NState}} ->
-            From ! ?FAIL(Ref),
+        {ok, {fail, ?FROM(From, Ref)=Tag, Reason, NState}} ->
+            From ! ?FAIL(Ref, Reason),
             NInnerState = debug(?FAIL_RET(Tag),
                                 InnerState#inner_state{state=NState}),
             loop(NInnerState#inner_state{timeout=infinity});
-        {ok, {fail, ?FROM(From, Ref)=Tag, NState, Time}} ->
-            From ! ?FAIL(Ref),
+        {ok, {fail, ?FROM(From, Ref)=Tag, Reason, NState, Time}} ->
+            From ! ?FAIL(Ref, Reason),
             NInnerState = debug(?FAIL_RET(Tag),
                                 InnerState#inner_state{state=NState}),
             loop(NInnerState#inner_state{timeout=Time});
@@ -692,9 +692,9 @@ print_event(Dev, ?CAST(Msg), Name) ->
 print_event(Dev, ?ACK(Ref, Ack), Name) ->
     io:format(Dev, "*DBG* ~p got acknowledgement ~p from ~p~n",
               [Name, Ack, Ref]);
-print_event(Dev, ?FAIL(Ref), Name) ->
-    io:format(Dev, "*DBG* ~p message to ~p timed out~n",
-              [Name, Ref]);
+print_event(Dev, ?FAIL(Ref, Reason), Name) ->
+    io:format(Dev, "*DBG* ~p message to ~p has failed with reason ~p~n",
+              [Name, Ref, Reason]);
 print_event(Dev, ?MSG(Tag, Msg), Name) ->
     io:format(Dev, "*DBG* ~p got msg ~p from ~p~n",
               [Name, Msg, Tag]);

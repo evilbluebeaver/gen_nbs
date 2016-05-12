@@ -431,11 +431,11 @@ test_send(_Config) ->
 
 test_await(_Config) ->
     {ok, Pid1} = gen_nbs:start(?TEST_MODULE, [], []),
-    {[], [tag1]} = gen_nbs:await(gen_nbs:msg(Pid1, {fail}, tag1)),
+    {[], [{tag1, fail}]} = gen_nbs:await(gen_nbs:msg(Pid1, {fail}, tag1)),
     {[{tag2, ok}, {tag1, ok}], []} = gen_nbs:await([gen_nbs:msg(Pid1, {ack, ok}, tag1),
                                             gen_nbs:msg(Pid1, {ack, ok}, tag2)]),
-    {[], [tag1]} = gen_nbs:await(gen_nbs:msg(Pid1, {down}, tag1)),
-    {[], [tag1]} = gen_nbs:await(gen_nbs:msg(Pid1, {down}, tag1, 0)),
+    {[], [{tag1, down}]} = gen_nbs:await(gen_nbs:msg(Pid1, {down}, tag1)),
+    {[], [{tag1, down}]} = gen_nbs:await(gen_nbs:msg(Pid1, {down}, tag1, 0)),
     ok.
 
 test_msg(_Config) ->

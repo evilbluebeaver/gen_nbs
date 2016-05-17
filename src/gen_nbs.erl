@@ -22,7 +22,7 @@
 -export([start/3, start/4,
          start_link/3, start_link/4,
          abcast/2, abcast/3,
-         multimsg/3, multimsg/4, multimsg/5,
+         multimsg/2, multimsg/3,
          stop/1, stop/3,
          cast/2, msg/3, msg/4,
          await/1, ack/2, fail/2,
@@ -48,18 +48,20 @@
 -type dest() :: pid() | atom() | {atom(), atom()} | {global, atom()} | {via, atom(), term()}.
 -type options() :: [atom() | tuple()].
 -type from() :: {pid(), reference()}.
--type await() :: {reference(), reference() | undefined, term()}.
+-type refs() :: reference() | [reference()].
+-type await() :: {refs(), reference() | undefined, term()} |
+[{refs(), reference() | undefined, term()}].
 -type callback_result() ::
-    {fail, To :: from(), Reason :: term(), NewState :: term()} |
-    {fail, To :: from(), Reason :: term(), NewState :: term(), timeout()} |
-    {ack, To :: from(), Ack :: term(), NewState :: term()} |
-    {ack, To :: from(), Ack :: term(), NewState :: term(), timeout() | hibernate} |
-    {await, Await :: await(), NewState :: term()} |
-    {await, Await :: await(), NewState :: term(), timeout() | hibernate} |
-    {ok, NewState :: term()} |
-    {ok, NewState :: term(), timeout() | hibernate} |
-    {stop, Reason :: term(), Reply :: term(), NewState :: term()} |
-    {stop, Reason :: term(), NewState :: term()}.
+{fail, To :: from(), Reason :: term(), NewState :: term()} |
+{fail, To :: from(), Reason :: term(), NewState :: term(), timeout()} |
+{ack, To :: from(), Ack :: term(), NewState :: term()} |
+{ack, To :: from(), Ack :: term(), NewState :: term(), timeout() | hibernate} |
+{await, Await :: await(), NewState :: term()} |
+{await, Await :: await(), NewState :: term(), timeout() | hibernate} |
+{ok, NewState :: term()} |
+{ok, NewState :: term(), timeout() | hibernate} |
+{stop, Reason :: term(), Reply :: term(), NewState :: term()} |
+{stop, Reason :: term(), NewState :: term()}.
 
 -export_type([await/0]).
 %%%=========================================================================
@@ -71,9 +73,7 @@
     {stop, Reason :: term()} | ignore.
 -callback handle_msg(Message :: term(), From :: from(), State :: term()) ->
     callback_result().
--callback handle_ack(Ack :: term(), Tag :: term(), State :: term()) ->
-    callback_result().
--callback handle_fail(Tag :: term(), Reason :: term(), State :: term()) ->
+-callback handle_ack({ack, Ack :: term()} | {fail, Reason :: term()}, Tag :: term(), State :: term()) ->
     callback_result().
 -callback handle_info(Info :: timeout | term(), State :: term()) ->
     callback_result().
@@ -93,15 +93,17 @@
 -optional_callbacks([format_status/2]).
 
 -define(FROM(What, Ref), {What, Ref}).
--define(AWAIT(Ref, Timer, Tag), {Ref, Timer, Tag}).
+-define(AWAIT(MasterRef, Refs, Timer, Tag), {'$gen_await', MasterRef, Refs, Timer, Tag}).
+-define(AWAIT(Ref, Timer, Tag), {'$gen_await', Ref, Timer, Tag}).
 
--define(ACK(Ref, Ack),      {'$gen_ack',  Ref, Ack}).
+-define(ACK(Ref, Result, Ack),  {'$gen_ack', Result, Ref, Ack}).
+-define(SUCCESS(Ref, Ack),      ?ACK(Ref, ack, Ack)).
+-define(FAIL(Ref, Reason),      ?ACK(Ref, fail, Reason)).
+
 -define(CAST(Msg),          {'$gen_cast', Msg}).
 -define(MSG(From, Msg),     {'$gen_msg',  From, Msg}).
--define(FAIL(Ref, Reason),  {'$gen_fail', Ref, Reason}).
 
 -define(OK_RET(State),      {ok, State}).
--define(TIMERS_RET(Timers), {timers, Timers}).
 -define(ACK_RET(Tag),       {ack, Tag}).
 -define(FAIL_RET(Tag),      {fail, Tag}).
 -define(AWAIT_RET(Await),   {await, Await}).
@@ -164,7 +166,7 @@ stop(Name, Reason, Timeout) ->
 
 -spec cast(Dest :: dest(), Msg :: term()) -> ok.
 cast(Dest, Msg) ->
-    do_send(Dest, cast, Msg).
+    do_send(Dest, ?CAST(Msg)).
 
 %% -----------------------------------------------------------------
 %% Post a message to a generic server.
@@ -175,7 +177,17 @@ msg(Dest, Msg, Tag) ->
     msg(Dest, Msg, Tag, ?DEFAULT_TIMEOUT).
 -spec msg(Dest :: dest(), Msg :: term(), Tag :: term(), Timeout :: timeout()) -> await().
 msg(Dest, Msg, Tag, Timeout) ->
-    do_send(Dest, msg, {Msg, Tag}, Timeout).
+    SName = monitor_suitable_name(Dest),
+    Ref = monitor(process, SName),
+    TimerRef = case Timeout of
+                   infinity ->
+                       undefined;
+                   T ->
+                       erlang:send_after(T, self(), ?FAIL(Ref, timeout))
+               end,
+    From = ?FROM(self(), Ref),
+    do_send(Dest, ?MSG(From, Msg)),
+    ?AWAIT(Ref, TimerRef, Tag).
 
 %% -----------------------------------------------------------------
 %% Manual ack/fail
@@ -183,7 +195,7 @@ msg(Dest, Msg, Tag, Timeout) ->
 
 -spec ack(From :: from(), Ack :: term()) -> ok.
 ack(?FROM(From, Ref), Ack) ->
-    From ! ?ACK(Ref, Ack),
+    From ! ?SUCCESS(Ref, Ack),
     ok.
 
 -spec fail(From :: from(), Reason :: term()) -> ok.
@@ -196,14 +208,14 @@ fail(?FROM(From, Ref), Reason) ->
 %% -----------------------------------------------------------------
 
 -define(CLEAN(Ref),
-    receive
-        ?FAIL(Ref, _) ->
-            ok;
-        {'DOWN', Ref, process, _Pid, _Info} ->
-            ok
-    after 0 ->
-              ok
-    end).
+        receive
+            ?FAIL(Ref, _) ->
+                ok;
+            {'DOWN', Ref, process, _Pid, _Info} ->
+                ok
+        after 0 ->
+                  ok
+        end).
 -spec await(Awaits :: await() | [await()]) -> {[{term(), term()}], [term()]}.
 await(Awaits) when is_list(Awaits) ->
     do_receive(Awaits);
@@ -217,27 +229,27 @@ do_receive(Awaits) ->
 do_receive([], Results, Failed) ->
     {Results, Failed};
 
-do_receive([?AWAIT(Ref, Timer, Tag) | Awaits], Results, Failed) ->
+do_receive([?AWAIT(Ref, TimerRef, Tag) | Awaits], Results, Failed) ->
     receive
-        ?ACK(Ref, Ack) ->
-            clean_ref(Ref, Timer),
+        ?SUCCESS(Ref, Ack) ->
+            clean_ref(Ref, TimerRef),
             do_receive(Awaits, [{Tag, Ack} | Results], Failed)
     after 0 ->
               receive
-                  ?ACK(Ref, Ack) ->
-                      clean_ref(Ref, Timer),
+                  ?SUCCESS(Ref, Ack) ->
+                      clean_ref(Ref, TimerRef),
                       do_receive(Awaits, [{Tag, Ack} | Results], Failed);
                   ?FAIL(Ref, Reason) ->
-                      clean_ref(Ref, Timer),
+                      clean_ref(Ref, TimerRef),
                       do_receive(Awaits, Results, [{Tag, Reason} | Failed]);
                   {'DOWN', Ref, process, _Pid, _Info} ->
-                      clean_ref(Ref, Timer),
+                      clean_ref(Ref, TimerRef),
                       do_receive(Awaits, Results, [{Tag, down} | Failed])
               end
     end.
 
-clean_ref(Ref, Timer) ->
-    erlang:cancel_timer(Timer),
+clean_ref(Ref, TimerRef) ->
+    erlang:cancel_timer(TimerRef),
     erlang:demonitor(Ref),
     ?CLEAN(Ref).
 
@@ -246,66 +258,37 @@ clean_ref(Ref, Timer) ->
 %%------------------------------------------------------------------
 -spec abcast(Name :: dest(), Msg :: term()) -> abcast.
 abcast(Name, Msg) when is_atom(Name) ->
-    do_abcast([node() | nodes()], Name, Msg).
+    abcast([node() | nodes()], Name, Msg).
 
 -spec abcast(Nodes :: [atom()], Name :: atom(), Msg :: term()) -> abcast.
 abcast(Nodes, Name, Msg) when is_list(Nodes), is_atom(Name) ->
-    do_abcast(Nodes, Name, Msg).
+    Fun = fun(Node) -> do_send({Name, Node}, ?CAST(Msg)) end,
+    ok = lists:foreach(Fun, Nodes).
 
--spec multimsg(Name :: dest(), Msg :: term(), Tag :: term()) -> [await()].
-multimsg(Name, Msg, Tag) when is_atom(Name) ->
-    do_multimsg([node() | nodes()], Name, msg, {Msg, Tag}).
+multimsg(Msgs, Tag) when is_map(Msgs)->
+    multimsg(Msgs, Tag, ?DEFAULT_TIMEOUT).
 
--spec multimsg(Name :: dest(), Msg :: term(), Tag :: term(), Timeout :: timeout()) -> [await()];
-              (Nodes :: [atom()], Name :: atom(), Msg :: term(), Tag :: term()) -> [await()].
-multimsg(Nodes, Name, Msg, Tag) when is_list(Nodes), is_atom(Name) ->
-    do_multimsg(Nodes, Name, msg, {Msg, Tag});
-
-multimsg(Name, Msg, Tag, Timeout) when is_atom(Name) ->
-    do_multimsg([node() | nodes()], Name, msg, {Msg, Tag}, Timeout).
-
--spec multimsg(Nodes :: [atom()], Name :: atom(), Msg :: term(), Tag :: term(), Timeout :: timeout()) -> [await()].
-multimsg(Nodes, Name, Msg, Tag, Timeout) when is_list(Nodes), is_atom(Name) ->
-    do_multimsg(Nodes, Name, msg, {Msg, Tag}, Timeout).
-
-do_abcast(Nodes, Name, Msg) ->
-    do_multimsg(Nodes, Name, cast, Msg),
-    abcast.
-
-do_multimsg(Nodes, Name, Type, Msg) ->
-    do_multimsg(Nodes, Name, Type, Msg, ?DEFAULT_TIMEOUT).
-do_multimsg(Nodes, Name, Type, Msg, Timeout) ->
-    do_multimsg(Nodes, Name, Type, Msg, Timeout, []).
-do_multimsg([Node|Nodes], Name, Type, Msg, Timeout, Result) when is_atom(Node) ->
-    R = do_send({Name,Node}, Type, Msg, Timeout),
-    do_multimsg(Nodes, Name, Type, Msg, Timeout, [R | Result]);
-do_multimsg([], _, _, _, _, Result) -> Result.
+multimsg(Msgs, Tag, Timeout) when is_map(Msgs) ->
+    MasterRef = make_ref(),
+    Refs = maps:fold(fun(Dest, Msg, Acc) ->
+                             SName = monitor_suitable_name(Dest),
+                             Ref = monitor(process, SName),
+                             From = ?FROM(self(), Ref),
+                             do_send(Dest, ?MSG(From, Msg)),
+                             [{Ref, Dest} | Acc]
+                     end, [], Msgs),
+    TimerRef = case Timeout of
+                   infinity ->
+                       undefined;
+                   T ->
+                       erlang:send_after(T, self(), ?FAIL(MasterRef, timeout))
+               end,
+    ?AWAIT(MasterRef, Refs, TimerRef, Tag).
 
 %% -----------------------------------------------------------------
 %% Send functions
 %% -----------------------------------------------------------------
 %%
-
--spec do_send(Dest :: dest(), cast, Msg :: term()) -> ok.
-do_send(Dest, cast, Msg) ->
-    do_cmd_send(Dest, ?CAST(Msg)).
-
--spec do_send(Dest :: dest(), cast, Msg :: term(), Timeout :: timeout()) -> await();
-             (Dest :: dest(), msg,  Msg :: {term(), term()}, Timeout :: timeout()) -> await().
-do_send(Dest, cast, Msg, _) ->
-    do_cmd_send(Dest, ?CAST(Msg));
-do_send(Dest, msg, {Msg, Tag}, Timeout) ->
-    SName = monitor_suitable_name(Dest),
-    Ref = monitor(process, SName),
-    TimerRef = case Timeout of
-                   infinity ->
-                       undefined;
-                   T ->
-                       erlang:send_after(T, self(), ?FAIL(Ref, timeout))
-               end,
-    From = ?FROM(self(), Ref),
-    do_cmd_send(Dest, ?MSG(From, Msg)),
-    ?AWAIT(Ref, TimerRef, Tag).
 
 monitor_suitable_name(Pid) when is_pid(Pid) ->
     Pid;
@@ -318,18 +301,18 @@ monitor_suitable_name({via, Mod, Name}) ->
 monitor_suitable_name({Dest, Node}=FullName) when is_atom(Dest), is_atom(Node) ->
     FullName.
 
-do_cmd_send({global, Name}, Cmd) ->
+do_send({global, Name}, Cmd) ->
     catch global:send(Name, Cmd);
-do_cmd_send({via, Mod, Name}, Cmd) ->
+do_send({via, Mod, Name}, Cmd) ->
     catch Mod:send(Name, Cmd);
-do_cmd_send({Name, Node}=Dest, Cmd) when is_atom(Name), is_atom(Node) ->
-    do_cmd_default_send(Dest, Cmd);
-do_cmd_send(Dest, Cmd) when is_atom(Dest) ->
-    do_cmd_default_send(Dest, Cmd);
-do_cmd_send(Dest, Cmd) when is_pid(Dest) ->
-    do_cmd_default_send(Dest, Cmd).
+do_send({Name, Node}=Dest, Cmd) when is_atom(Name), is_atom(Node) ->
+    do_default_send(Dest, Cmd);
+do_send(Dest, Cmd) when is_atom(Dest) ->
+    do_default_send(Dest, Cmd);
+do_send(Dest, Cmd) when is_pid(Dest) ->
+    do_default_send(Dest, Cmd).
 
-do_cmd_default_send(Dest, Cmd) ->
+do_default_send(Dest, Cmd) ->
     case catch erlang:send(Dest, Cmd, [noconnect]) of
         noconnect ->
             spawn(erlang, send, [Dest, Cmd]);
@@ -338,13 +321,14 @@ do_cmd_default_send(Dest, Cmd) ->
     end,
     ok.
 
+
 -record(inner_state, {parent,
                       name,
                       state,
                       mod,
                       timeout,
                       debug,
-                      timers=#{}}).
+                      awaits=#{}}).
 
 %%-----------------------------------------------------------------
 %% enter_loop(Mod, Options, State, <ServerName>, <TimeOut>) ->_
@@ -501,60 +485,67 @@ decode_msg(Msg, InnerState=#inner_state{parent=Parent,
 %% report.
 %% ---------------------------------------------------
 
-try_dispatch({'DOWN', Ref, process, _Pid, _Info}, Mod, State, Timers) ->
-    try_dispatch(?FAIL(Ref, down), Mod, State, Timers);
-try_dispatch(?CAST(Msg), Mod, State, _Timers) ->
-    try_handle(Mod, handle_cast, [Msg, State]);
-try_dispatch(?MSG(From, Msg), Mod, State, _Timers) ->
-    try_handle(Mod, handle_msg, [Msg, From, State]);
-try_dispatch(?FAIL(Ref, Reason), Mod, State, Timers) ->
-    true = demonitor(Ref),
-    case maps:find(Ref, Timers) of
-        error ->
-            {ok, {ok, State}};
-        {ok, {Timer, Tag}} ->
-            NTimers = maps:remove(Ref, Timers),
-            case Timer of
-                undefined ->
-                    ok;
-                _ ->
-                    erlang:cancel_timer(Timer)
-            end,
-            try_handle(Mod, handle_fail, [Tag, Reason, State], NTimers)
-    end;
-try_dispatch(?ACK(Ref, Ack), Mod, State, Timers) ->
-    true = demonitor(Ref),
-    case maps:find(Ref, Timers) of
-        error ->
-            {ok, {ok, State}};
-        {ok, {Timer, Tag}} ->
-            NTimers = maps:remove(Ref, Timers),
-            case Timer of
-                undefined ->
-                    ok;
-                _ ->
-                    erlang:cancel_timer(Timer)
-            end,
-            try_handle(Mod, handle_ack, [Ack, Tag, State], NTimers)
-    end;
-try_dispatch(Info, Mod, State, _Timers) ->
-    try_handle(Mod, handle_info, [Info, State]).
+cancel_timer(TimerRef) ->
+    case TimerRef of
+        undefined ->
+            ok;
+        _ ->
+            erlang:cancel_timer(TimerRef)
+    end.
 
-try_handle(Mod, Func, Args) ->
-    try_handle(Mod, Func, Args, undefined).
+try_dispatch({'DOWN', Ref, process, _Pid, _Info}, Mod, State, Awaits) ->
+    try_dispatch(?FAIL(Ref, down), Mod, State, Awaits);
+try_dispatch(?CAST(Msg), Mod, State, Awaits) ->
+    try_handle(Mod, handle_cast, [Msg, State], Awaits);
+try_dispatch(?MSG(From, Msg), Mod, State, Awaits) ->
+    try_handle(Mod, handle_msg, [Msg, From, State], Awaits);
+try_dispatch(?ACK(Ref, Result, Reason), Mod, State, Awaits) ->
+    true = demonitor(Ref),
+    case maps:find(Ref, Awaits) of
+        error ->
+            ok ;
+        {ok, {simple, TimerRef, Tag}} ->
+            NAwaits = maps:remove(Ref, Awaits),
+            cancel_timer(TimerRef),
+            try_handle(Mod, handle_ack, [{Result, Reason}, Tag, State], NAwaits);
+        {ok, {master, TimerRef, Tag, Refs, Results}} ->
+            NAwaits = maps:remove(Ref, Awaits),
+            Fun = fun({R, ChildTag}, {Awa, Res}) ->
+                          {maps:remove(R, Awa),
+                           maps:put(ChildTag, {fail, Reason}, Res)}
+                  end,
 
-try_handle(Mod, Func, Args, Timers) ->
-   try
+            {NAwaits1, Results1} = lists:foldl(Fun, {NAwaits, Results}, maps:to_list(Refs)),
+            cancel_timer(TimerRef),
+            try_handle(Mod, handle_ack, [Results1, Tag, State], NAwaits1);
+        {ok, {child, ChildTag, MasterRef}} ->
+            NAwaits = maps:remove(Ref, Awaits),
+            {master, TimerRef, Tag, Refs, Results} = maps:get(MasterRef, NAwaits),
+            Results1 = maps:put(ChildTag, {Result, Reason}, Results),
+            Refs1 = maps:remove(Ref, Refs),
+            case maps:size(Refs1) of
+                0 ->
+                    NAwaits1 = maps:remove(MasterRef, NAwaits),
+                    cancel_timer(TimerRef),
+                    try_handle(Mod, handle_ack, [Results1, Tag, State], NAwaits1);
+                _ ->
+
+                    NAwaits1 = maps:update(MasterRef,
+                                           {master, TimerRef, Tag, Refs1, Results1}, NAwaits),
+                    {ok, NAwaits1}
+            end
+    end;
+
+try_dispatch(Info, Mod, State, Awaits) ->
+    try_handle(Mod, handle_info, [Info, State], Awaits).
+
+try_handle(Mod, Func, Args, Awaits) ->
+    try
         Reply = erlang:apply(Mod, Func, Args),
-        case Timers of
-            undefined ->
-                {ok, Reply};
-            T ->
-                {timers, T, {ok, Reply}}
-        end
+        {ok, Reply, Awaits}
     catch
         throw:R ->
-            {ok, R};
+            {ok, R, Awaits};
         error:R ->
             Stacktrace = erlang:get_stacktrace(),
             {'EXIT', {R, Stacktrace}, {R, Stacktrace}};
@@ -563,12 +554,12 @@ try_handle(Mod, Func, Args, Timers) ->
             {'EXIT', R, {R, Stacktrace}}
     end.
 
-try_terminate(Mod, Reason, State) ->
+try_terminate(Mod, Reason, State, Awaits) ->
     try
         {ok, Mod:terminate(Reason, State)}
     catch
         throw:R ->
-            {ok, R};
+            {ok, R, Awaits};
         error:R ->
             Stacktrace = erlang:get_stacktrace(),
             {'EXIT', {R, Stacktrace}, {R, Stacktrace}};
@@ -581,68 +572,86 @@ try_terminate(Mod, Reason, State) ->
 %%% Message handling functions
 %%% ---------------------------------------------------
 
-handle_msg(Msg, InnerState=#inner_state{mod=Mod, state=State, timers=Timers}) ->
-    Reply = try_dispatch(Msg, Mod, State, Timers),
+handle_msg(Msg, InnerState=#inner_state{mod=Mod, state=State,
+                                        awaits=Awaits}) ->
+    Reply = try_dispatch(Msg, Mod, State, Awaits),
     handle_common_reply(Reply, Msg, InnerState).
 
-handle_common_reply(Reply, Msg, InnerState=#inner_state{timers=Timers}) ->
+handle_common_reply(Reply, Msg, InnerState) ->
     case Reply of
-        {ok, {await, Await, NState}} ->
-            NTimers = update_timers(Await, Timers),
-            NInnerState = debug(?AWAIT_RET(Await),
-                                InnerState#inner_state{state=NState, timers=NTimers}),
-            loop(NInnerState#inner_state{timeout=infinity});
-        {ok, {await, Await, NState, Time}} ->
-            NTimers = update_timers(Await, Timers),
-            NInnerState = debug(?AWAIT_RET(Await),
-                                InnerState#inner_state{state=NState, timers=NTimers}),
-            loop(NInnerState#inner_state{timeout=Time});
-        {ok, {ack, ?FROM(From, Ref)=Tag, Ack, NState}} ->
-            From ! ?ACK(Ref, Ack),
-            NInnerState = debug(?ACK_RET(Tag),
-                                InnerState#inner_state{state=NState}),
-            loop(NInnerState#inner_state{timeout=infinity});
-        {ok, {ack, ?FROM(From, Ref)=Tag, Ack, NState, Time}} ->
-            From ! ?ACK(Ref, Ack),
-            NInnerState = debug(?ACK_RET(Tag),
-                                InnerState#inner_state{state=NState}),
-            loop(NInnerState#inner_state{timeout=Time});
-        {ok, {fail, ?FROM(From, Ref)=Tag, Reason, NState}} ->
-            From ! ?FAIL(Ref, Reason),
-            NInnerState = debug(?FAIL_RET(Tag),
-                                InnerState#inner_state{state=NState}),
-            loop(NInnerState#inner_state{timeout=infinity});
-        {ok, {fail, ?FROM(From, Ref)=Tag, Reason, NState, Time}} ->
-            From ! ?FAIL(Ref, Reason),
-            NInnerState = debug(?FAIL_RET(Tag),
-                                InnerState#inner_state{state=NState}),
-            loop(NInnerState#inner_state{timeout=Time});
-        {timers, NTimers, NReply} ->
-            NInnerState = debug(?TIMERS_RET(NTimers),
-                                InnerState#inner_state{timers=NTimers}),
-            handle_common_reply(NReply, Msg, NInnerState);
-        {ok, {ok, NState}} ->
-            NInnerState = debug(?OK_RET(NState),
-                                InnerState#inner_state{state=NState}),
-            loop(NInnerState#inner_state{timeout=infinity});
-        {ok, {ok, NState, Time}} ->
-            NInnerState = debug(?OK_RET(NState),
-                                InnerState#inner_state{state=NState}),
-            loop(NInnerState#inner_state{timeout=Time});
-        {ok, {stop, Reason, NState}} ->
-            terminate(Reason, Msg, InnerState#inner_state{state=NState});
+        ok ->
+            loop(InnerState);
+        {ok, NAwaits} ->
+            loop(InnerState#inner_state{awaits=NAwaits});
+        {ok, InnerReply, NAwaits} ->
+            loop(handle_inner_reply(InnerReply, Msg,
+                                    InnerState#inner_state{awaits=NAwaits}));
         {'EXIT', ExitReason, ReportReason} ->
-            terminate(ExitReason, ReportReason, InnerState);
-        {ok, BadReply} ->
+            terminate(ExitReason, ReportReason, InnerState)
+    end.
+
+handle_inner_reply(Reply, Msg, InnerState) ->
+    case Reply of
+        {await, Await, NState} ->
+            NInnerState = InnerState#inner_state{state=NState},
+            NInnerState1 = update_awaits(Await, NInnerState),
+            NInnerState2 = debug(?AWAIT_RET(Await), NInnerState1),
+            NInnerState2#inner_state{timeout=infinity};
+        {await, Await, NState, Time} ->
+            NInnerState = InnerState#inner_state{state=NState},
+            NInnerState1 = update_awaits(Await, NInnerState),
+            NInnerState2 = debug(?AWAIT_RET(Await), NInnerState1),
+            NInnerState2#inner_state{timeout=Time};
+        {ack, ?FROM(From, Ref)=Tag, Ack, NState} ->
+            From ! ?SUCCESS(Ref, Ack),
+            NInnerState = debug(?ACK_RET(Tag),
+                                InnerState#inner_state{state=NState}),
+            NInnerState#inner_state{timeout=infinity};
+        {ack, ?FROM(From, Ref)=Tag, Ack, NState, Time} ->
+            From ! ?SUCCESS(Ref, Ack),
+            NInnerState = debug(?ACK_RET(Tag),
+                                InnerState#inner_state{state=NState}),
+            NInnerState#inner_state{timeout=Time};
+        {fail, ?FROM(From, Ref)=Tag, Reason, NState} ->
+            From ! ?FAIL(Ref, Reason),
+            NInnerState = debug(?FAIL_RET(Tag),
+                                InnerState#inner_state{state=NState}),
+            NInnerState#inner_state{timeout=infinity};
+        {fail, ?FROM(From, Ref)=Tag, Reason, NState, Time} ->
+            From ! ?FAIL(Ref, Reason),
+            NInnerState = debug(?FAIL_RET(Tag),
+                                InnerState#inner_state{state=NState}),
+            NInnerState#inner_state{timeout=Time};
+        {ok, NState} ->
+            NInnerState = debug(?OK_RET(NState),
+                                InnerState#inner_state{state=NState}),
+            NInnerState#inner_state{timeout=infinity};
+        {ok, NState, Time} ->
+            NInnerState = debug(?OK_RET(NState),
+                                InnerState#inner_state{state=NState}),
+            NInnerState#inner_state{timeout=Time};
+        {stop, Reason, NState} ->
+            terminate(Reason, Msg, InnerState#inner_state{state=NState});
+        BadReply ->
             terminate({bad_return_value, BadReply}, Msg, InnerState)
     end.
 
-update_timers([], Timers) ->
-    Timers;
-update_timers(Await, Timers) when is_list(Await) ->
-    lists:foldl(fun update_timers/2, Timers, Await);
-update_timers(?AWAIT(Ref, Timer, Tag), Timers) ->
-    maps:put(Ref, {Timer, Tag}, Timers).
+update_awaits(NewAwaits,
+              InnerState=#inner_state{awaits=Awaits}) when is_list(NewAwaits) ->
+    Fun = fun(?AWAIT(MasterRef, Refs, TimerRef, Tag), Acc) when is_list(Refs) ->
+                  Refs1 = maps:from_list(Refs),
+                  Acc1 = maps:put(MasterRef, {master, TimerRef, Tag, Refs1, #{}}, Acc),
+                  lists:foldl(fun({Ref, ChildTag}, RAcc) ->
+                                      maps:put(Ref, {child, ChildTag, MasterRef}, RAcc)
+                              end, Acc1, Refs);
+             (?AWAIT(Ref, TimerRef, Tag), Acc) ->
+                  maps:put(Ref, {simple, TimerRef, Tag}, Acc)
+          end,
+    NAwaits = lists:foldl(Fun, Awaits, NewAwaits),
+    InnerState#inner_state{awaits=NAwaits};
+
+update_awaits(Await, InnerState) ->
+    update_awaits([Await], InnerState).
 
 
 %%-----------------------------------------------------------------
@@ -689,7 +698,7 @@ debug(Msg, InnerState=#inner_state{name=Name,
 print_event(Dev, ?CAST(Msg), Name) ->
     io:format(Dev, "*DBG* ~p got cast ~p~n",
               [Name, Msg]);
-print_event(Dev, ?ACK(Ref, Ack), Name) ->
+print_event(Dev, ?SUCCESS(Ref, Ack), Name) ->
     io:format(Dev, "*DBG* ~p got acknowledgement ~p from ~p~n",
               [Name, Ack, Ref]);
 print_event(Dev, ?FAIL(Ref, Reason), Name) ->
@@ -700,8 +709,6 @@ print_event(Dev, ?MSG(Tag, Msg), Name) ->
               [Name, Msg, Tag]);
 print_event(Dev, ?OK_RET(State), Name) ->
     io:format(Dev, "*DBG* ~p new state ~p~n", [Name, State]);
-print_event(Dev, ?TIMERS_RET(Timers), Name) ->
-    io:format(Dev, "*DBG* ~p new timers ~p~n", [Name, Timers]);
 print_event(Dev, ?ACK_RET(Tag), Name) ->
     io:format(Dev, "*DBG* ~p sent acknowledgement to ~p~n", [Name, Tag]);
 print_event(Dev, ?FAIL_RET(Tag), Name) ->
@@ -725,8 +732,9 @@ terminate(Reason, Msg, InnerState) ->
 terminate(ExitReason, ReportReason, Msg, #inner_state{mod=Mod,
                                                       state=State,
                                                       name=Name,
-                                                      debug=Debug}) ->
-    Reply = try_terminate(Mod, ExitReason, State),
+                                                      debug=Debug,
+                                                      awaits=Awaits}) ->
+    Reply = try_terminate(Mod, ExitReason, State, Awaits),
     case Reply of
         {'EXIT', ExitReason1, ReportReason1} ->
             FmtState = format_status(terminate, Mod, get(), State),

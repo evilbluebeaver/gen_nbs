@@ -50,9 +50,8 @@
 -type dest() :: pid() | atom() | {atom(), atom()} | {global, atom()} | {via, atom(), term()}.
 -type options() :: [atom() | tuple()].
 -type from() :: {pid(), reference()}.
--type refs() :: reference() | [reference()].
--type await() :: {refs(), reference() | undefined, term()} |
-[{refs(), reference() | undefined, term()}].
+-type result_r() :: {ack, term()} | {fail, term()}.
+-type result() :: result_r() | [result_r()].
 -type callback_result() ::
 {fail, To :: from(), Reason :: term(), NewState :: term()} |
 {fail, To :: from(), Reason :: term(), NewState :: term(), timeout()} |
@@ -216,7 +215,7 @@ fail(?FROM(From, Ref), Reason) ->
         after 0 ->
                   ok
         end).
--spec await(Awaits :: await() | [await()]) -> {[{term(), term()}], [term()]}.
+-spec await(Awaits :: await() | [await()]) -> #{term() => result()}.
 await(Awaits) when is_list(Awaits) ->
     do_receive(Awaits);
 
@@ -224,27 +223,27 @@ await(Await) ->
     do_receive([Await]).
 
 do_receive(Awaits) ->
-    do_receive(Awaits, [], []).
+    do_receive(Awaits, #{}).
 
-do_receive([], Results, Failed) ->
-    {Results, Failed};
+do_receive([], Results) ->
+    Results;
 
-do_receive([?AWAIT(Ref, TimerRef, Tag) | Awaits], Results, Failed) ->
+do_receive([?AWAIT(Ref, TimerRef, Tag) | Awaits], Results) ->
     receive
         ?SUCCESS(Ref, Ack) ->
             clean_ref(Ref, TimerRef),
-            do_receive(Awaits, [{Tag, Ack} | Results], Failed)
+            do_receive(Awaits, maps:put(Tag, {ack, Ack}, Results))
     after 0 ->
               receive
                   ?SUCCESS(Ref, Ack) ->
                       clean_ref(Ref, TimerRef),
-                      do_receive(Awaits, [{Tag, Ack} | Results], Failed);
+                      do_receive(Awaits, maps:put(Tag, {ack, Ack}, Results));
                   ?FAIL(Ref, Reason) ->
                       clean_ref(Ref, TimerRef),
-                      do_receive(Awaits, Results, [{Tag, Reason} | Failed]);
+                      do_receive(Awaits, maps:put(Tag, {fail, Reason}, Results));
                   {'DOWN', Ref, process, _Pid, _Info} ->
                       clean_ref(Ref, TimerRef),
-                      do_receive(Awaits, Results, [{Tag, down} | Failed])
+                      do_receive(Awaits, maps:put(Tag, {fail, down}, Results))
               end
     end.
 
@@ -263,7 +262,8 @@ abcast(Name, Msg) when is_atom(Name) ->
 -spec abcast(Nodes :: [atom()], Name :: atom(), Msg :: term()) -> abcast.
 abcast(Nodes, Name, Msg) when is_list(Nodes), is_atom(Name) ->
     Fun = fun(Node) -> do_send({Name, Node}, ?CAST(Msg)) end,
-    ok = lists:foreach(Fun, Nodes).
+    ok = lists:foreach(Fun, Nodes),
+    abcast.
 
 multimsg(Msgs, Tag) when is_map(Msgs)->
     multimsg(Msgs, Tag, ?DEFAULT_TIMEOUT).

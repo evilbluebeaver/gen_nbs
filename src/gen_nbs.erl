@@ -25,7 +25,7 @@
          multimsg/1, multimsg/2,
          stop/1, stop/3,
          cast/2, msg/3, msg/4,
-         await/1, await/2,
+         await/1,
          ack/2, fail/2,
          enter_loop/3, enter_loop/4, enter_loop/5, wake_hib/1]).
 
@@ -219,14 +219,10 @@ fail(?FROM(From, Ref), Reason) ->
                   ok
         end).
 
--spec await(TaggedMsgs :: #{}) -> #{term() => result()}.
-await(TaggedMsgs) when is_map(TaggedMsgs) ->
-    await(TaggedMsgs, ?DEFAULT_TIMEOUT).
-
--spec await(TaggedMsgs :: #{}, Timeout :: timeout()) -> #{term() => result()}.
-await(TaggedMsgs, Timeout) when is_map(TaggedMsgs) ->
+-spec await(Await :: #{}) -> #{term() => result()}.
+await(Await) when is_map(Await) ->
     Refs = gen_nbs_refs:new(),
-    Refs1 = gen_nbs_refs:reg(multimsg(TaggedMsgs, Timeout), Refs),
+    Refs1 = gen_nbs_refs:reg(Await, Refs),
     do_receive(Refs1, #{}).
 
 
@@ -241,6 +237,7 @@ do_receive(Refs, Results) ->
                                         ?ACK(R, RResult, RReason) ->
                                             {R, RResult, RReason}
                                     end,
+            true = demonitor(Ref),
             case gen_nbs_refs:use(Result, Reason, Ref, Refs) of
                 {ok, Refs1} ->
                     do_receive(Refs1, Results);
@@ -271,12 +268,12 @@ multimsg(TaggedMsgs, Timeout) when is_map(TaggedMsgs) ->
     Fun = fun(_Tag, Msgs) ->
                   MasterRef = make_ref(),
                   ChildRefs = maps:fold(fun(Dest, Msg, Acc) ->
-                                           SName = monitor_suitable_name(Dest),
-                                           Ref = monitor(process, SName),
-                                           From = ?FROM(self(), Ref),
-                                           do_send(Dest, ?MSG(From, Msg)),
-                                           maps:put(Ref, Dest, Acc)
-                                   end, #{}, Msgs),
+                                                SName = monitor_suitable_name(Dest),
+                                                Ref = monitor(process, SName),
+                                                From = ?FROM(self(), Ref),
+                                                do_send(Dest, ?MSG(From, Msg)),
+                                                maps:put(Ref, Dest, Acc)
+                                        end, #{}, Msgs),
                   TimerRef = case Timeout of
                                  infinity ->
                                      undefined;

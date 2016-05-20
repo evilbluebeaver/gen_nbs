@@ -37,12 +37,12 @@
 -define(TEST_FORMAT_MODULE, test_nbs_format).
 
 -define(CHECK_AFTER,
-    receive
-        Else ->
-            {fail, [Test, Else]}
-    after ?TIMEOUT ->
-              ok
-    end).
+        receive
+            Else ->
+                {fail, [Test, Else]}
+        after ?TIMEOUT ->
+                  ok
+        end).
 -define(WAIT_FOR_MSG(MSG),
         receive
             MSG ->
@@ -441,12 +441,13 @@ test_send(_Config) ->
 
 test_await(_Config) ->
     {ok, Pid1} = gen_nbs:start(?TEST_MODULE, [], []),
-    #{tag := #{Pid1 := {fail, fail}}} = gen_nbs:await(#{tag => #{Pid1 => {fail}}}),
-    #{tag1 := #{Pid1 := {ack, ok}},
-      tag2 := #{Pid1 := {ack, ok}}}= gen_nbs:await(#{tag1 => #{Pid1 => {ack, ok}},
-                         tag2 => #{Pid1 => {ack, ok}}}),
-    #{tag1 := #{Pid1 := {fail, down}}} = gen_nbs:await(#{tag1 => #{Pid1 => {down}}}),
-    #{tag1 := #{Pid1 := {fail, down}}} = gen_nbs:await(#{tag1 => #{Pid1 => {down}}}, ?TIMEOUT),
+    {ok, Pid2} = gen_nbs:start(?TEST_MODULE, [], []),
+    #{tag := #{Pid1 := {ack, ok},
+               Pid2 := {ack, ok}}} = gen_nbs:await(gen_nbs:multimsg(#{tag => #{Pid1 => {ack, ok},
+                                                                               Pid2 => {ack, ok}}})),
+    #{tag := {fail, fail}} = gen_nbs:await(gen_nbs:msg(Pid1, {fail}, tag)),
+    #{tag := {fail, down}} = gen_nbs:await(gen_nbs:msg(Pid1, {down}, tag)),
+    gen_nbs:stop(Pid2),
     ok.
 
 test_msg(_Config) ->

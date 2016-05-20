@@ -1,10 +1,6 @@
--define(AWAIT(MasterRef, Refs, Timer, Tag),
-        {await, MasterRef, Refs, Timer, Tag}).
--define(AWAIT(Ref, Timer, Tag),
-        {await, Ref, Timer, Tag}).
--type timer() :: reference() | undefined.
--type await_single() :: {await, reference(), timer(), term()}.
--type await_multiple() :: {await, reference(), [reference()], term()}.
--type await_r() :: await_single() | await_multiple().
--type await() :: await_r() | [await_r()].
+-record(await, {master_ref :: reference(),
+                timer_ref :: reference() | undefined,
+                child_refs :: #{term() => reference()} | undefined}).
+
+-type await() :: #{Tag :: term() => [#await{}] | #await{}}.
 

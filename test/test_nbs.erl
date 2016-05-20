@@ -56,15 +56,11 @@ handle_cast({timeout, Timeout}, State) ->
     {ok, State, Timeout};
 handle_cast(stop, State) ->
     {stop, normal, State};
-handle_cast({msg_multiple, Msg, To, Timeout}, State) ->
-    Await1 = gen_nbs:msg(To, {ack, Msg}, tag, Timeout),
-    Await2 = gen_nbs:msg(To, {ack, Msg}, tag, Timeout),
-    {await, [Await1, Await2], State};
 handle_cast({multimsg, Msgs}, State) ->
-    Await = gen_nbs:multimsg(Msgs, tag),
+    Await = gen_nbs:multimsg(#{tag => Msgs}),
     {await, Await, State};
 handle_cast({multimsg, Msgs, Timeout}, State) ->
-    Await = gen_nbs:multimsg(Msgs, tag, Timeout),
+    Await = gen_nbs:multimsg(#{tag => Msgs}, Timeout),
     {await, Await, State};
 handle_cast({msg_no_ack, Msg, To, Timeout}, State) ->
     Await = gen_nbs:msg(To, Msg, tag, Timeout),
@@ -73,7 +69,7 @@ handle_cast({msg_no_await, Msg, To, Timeout}, State) ->
     _Await = gen_nbs:msg(To, Msg, tag, Timeout),
     {ok, State};
 handle_cast({msg_await_timeout, Timeout}, State) ->
-    {await, [], State, Timeout};
+    {await, #{}, State, Timeout};
 handle_cast({msg_manual_ack, Msg, To}, State) ->
     Await = gen_nbs:msg(To, {manual_ack, Msg}, tag),
     {await, Await, State};

@@ -441,12 +441,12 @@ test_send(_Config) ->
 
 test_await(_Config) ->
     {ok, Pid1} = gen_nbs:start(?TEST_MODULE, [], []),
-    #{tag1 := {fail, fail}} = gen_nbs:await(gen_nbs:msg(Pid1, {fail}, tag1)),
-    #{tag2 := {ack, ok},
-      tag1 := {ack, ok}} = gen_nbs:await([gen_nbs:msg(Pid1, {ack, ok}, tag1),
-                                          gen_nbs:msg(Pid1, {ack, ok}, tag2)]),
-    #{tag1 := {fail, down}} = gen_nbs:await(gen_nbs:msg(Pid1, {down}, tag1)),
-    #{tag1 := {fail, down}} = gen_nbs:await(gen_nbs:msg(Pid1, {down}, tag1, 0)),
+    #{tag := #{Pid1 := {fail, fail}}} = gen_nbs:await(#{tag => #{Pid1 => {fail}}}),
+    #{tag1 := #{Pid1 := {ack, ok}},
+      tag2 := #{Pid1 := {ack, ok}}}= gen_nbs:await(#{tag1 => #{Pid1 => {ack, ok}},
+                         tag2 => #{Pid1 => {ack, ok}}}),
+    #{tag1 := #{Pid1 := {fail, down}}} = gen_nbs:await(#{tag1 => #{Pid1 => {down}}}),
+    #{tag1 := #{Pid1 := {fail, down}}} = gen_nbs:await(#{tag1 => #{Pid1 => {down}}}, ?TIMEOUT),
     ok.
 
 test_msg(_Config) ->
@@ -544,15 +544,6 @@ test_msg(_Config) ->
     ?WAIT_FOR_MSG({Pid2, {msg, Msg, Pid1}}),
     timer:sleep(?TIMEOUT),
     ?WAIT_FOR_MSG({Pid1, fail}),
-
-    %%
-    %% Multiple msgs
-    %%
-    gen_nbs:cast(Pid1, {msg_multiple, Msg, Pid2, ?TIMEOUT}),
-    ?WAIT_FOR_MSG({Pid2, {msg, Msg, Pid1}}),
-    ?WAIT_FOR_MSG({Pid2, {msg, Msg, Pid1}}),
-    ?WAIT_FOR_MSG({Pid1, ack}),
-    ?WAIT_FOR_MSG({Pid1, ack}),
 
     %%
     %% Post with no ack needed (unexisting_process)

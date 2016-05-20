@@ -22,10 +22,11 @@
 -export([start/3, start/4,
          start_link/3, start_link/4,
          abcast/2, abcast/3,
-         multimsg/2, multimsg/3,
+         multimsg/1, multimsg/2,
          stop/1, stop/3,
          cast/2, msg/3, msg/4,
-         await/1, ack/2, fail/2,
+         await/1, await/2,
+         ack/2, fail/2,
          enter_loop/3, enter_loop/4, enter_loop/5, wake_hib/1]).
 
 %% System exports
@@ -72,6 +73,8 @@
 -callback init(Args :: term()) ->
     {ok, State :: term()} | {ok, State :: term(), timeout() | hibernate} |
     {stop, Reason :: term()} | ignore.
+-callback handle_call(Message :: term(), From :: from(), State :: term()) ->
+    callback_result().
 -callback handle_msg(Message :: term(), From :: from(), State :: term()) ->
     callback_result().
 -callback handle_ack({ack, Ack :: term()} | {fail, Reason :: term()}, Tag :: term(), State :: term()) ->
@@ -186,7 +189,7 @@ msg(Dest, Msg, Tag, Timeout) ->
                end,
     From = ?FROM(self(), Ref),
     do_send(Dest, ?MSG(From, Msg)),
-    ?AWAIT(Ref, TimerRef, Tag).
+    #{Tag => #await{master_ref=Ref, timer_ref=TimerRef}}.
 
 %% -----------------------------------------------------------------
 %% Manual ack/fail
@@ -208,49 +211,45 @@ fail(?FROM(From, Ref), Reason) ->
 
 -define(CLEAN(Ref),
         receive
-            ?FAIL(Ref, _) ->
+            ?ACK(Ref, _, _) ->
                 ok;
-            {'DOWN', Ref, process, _Pid, _Info} ->
+            {'DOWN', Ref, process, _, _} ->
                 ok
         after 0 ->
                   ok
         end).
--spec await(Awaits :: await() | [await()]) -> #{term() => result()}.
-await(Awaits) when is_list(Awaits) ->
-    do_receive(Awaits);
 
-await(Await) ->
-    do_receive([Await]).
+-spec await(TaggedMsgs :: #{}) -> #{term() => result()}.
+await(TaggedMsgs) when is_map(TaggedMsgs) ->
+    await(TaggedMsgs, ?DEFAULT_TIMEOUT).
 
-do_receive(Awaits) ->
-    do_receive(Awaits, #{}).
+-spec await(TaggedMsgs :: #{}, Timeout :: timeout()) -> #{term() => result()}.
+await(TaggedMsgs, Timeout) when is_map(TaggedMsgs) ->
+    Refs = gen_nbs_refs:new(),
+    Refs1 = gen_nbs_refs:reg(multimsg(TaggedMsgs, Timeout), Refs),
+    do_receive(Refs1, #{}).
 
-do_receive([], Results) ->
-    Results;
 
-do_receive([?AWAIT(Ref, TimerRef, Tag) | Awaits], Results) ->
-    receive
-        ?SUCCESS(Ref, Ack) ->
-            clean_ref(Ref, TimerRef),
-            do_receive(Awaits, maps:put(Tag, {ack, Ack}, Results))
-    after 0 ->
-              receive
-                  ?SUCCESS(Ref, Ack) ->
-                      clean_ref(Ref, TimerRef),
-                      do_receive(Awaits, maps:put(Tag, {ack, Ack}, Results));
-                  ?FAIL(Ref, Reason) ->
-                      clean_ref(Ref, TimerRef),
-                      do_receive(Awaits, maps:put(Tag, {fail, Reason}, Results));
-                  {'DOWN', Ref, process, _Pid, _Info} ->
-                      clean_ref(Ref, TimerRef),
-                      do_receive(Awaits, maps:put(Tag, {fail, down}, Results))
-              end
+do_receive(Refs, Results) ->
+    case maps:size(Refs) of
+        0 ->
+            Results;
+        _ ->
+            {Ref, Result, Reason} = receive
+                                        {'DOWN', R, process, _Pid, _Info} ->
+                                            {R, fail, down};
+                                        ?ACK(R, RResult, RReason) ->
+                                            {R, RResult, RReason}
+                                    end,
+            case gen_nbs_refs:use(Result, Reason, Ref, Refs) of
+                {ok, Refs1} ->
+                    do_receive(Refs1, Results);
+                {ack, Ack, Tag, TimerRef, Refs1} ->
+                    cancel_timer(TimerRef),
+                    ?CLEAN(Ref),
+                    do_receive(Refs1, maps:put(Tag, Ack, Results))
+            end
     end.
-
-clean_ref(Ref, TimerRef) ->
-    erlang:cancel_timer(TimerRef),
-    erlang:demonitor(Ref),
-    ?CLEAN(Ref).
 
 %% -----------------------------------------------------------------
 %% Asynchronous broadcast, returns nothing, it's just send 'n' pray
@@ -265,25 +264,30 @@ abcast(Nodes, Name, Msg) when is_list(Nodes), is_atom(Name) ->
     ok = lists:foreach(Fun, Nodes),
     abcast.
 
-multimsg(Msgs, Tag) when is_map(Msgs)->
-    multimsg(Msgs, Tag, ?DEFAULT_TIMEOUT).
+multimsg(TaggedMsgs) when is_map(TaggedMsgs)->
+    multimsg(TaggedMsgs, ?DEFAULT_TIMEOUT).
 
-multimsg(Msgs, Tag, Timeout) when is_map(Msgs) ->
-    MasterRef = make_ref(),
-    Refs = maps:fold(fun(Dest, Msg, Acc) ->
-                             SName = monitor_suitable_name(Dest),
-                             Ref = monitor(process, SName),
-                             From = ?FROM(self(), Ref),
-                             do_send(Dest, ?MSG(From, Msg)),
-                             maps:put(Ref, Dest, Acc)
-                     end, #{}, Msgs),
-    TimerRef = case Timeout of
-                   infinity ->
-                       undefined;
-                   T ->
-                       erlang:send_after(T, self(), ?FAIL(MasterRef, timeout))
-               end,
-    ?AWAIT(MasterRef, Refs, TimerRef, Tag).
+multimsg(TaggedMsgs, Timeout) when is_map(TaggedMsgs) ->
+    Fun = fun(_Tag, Msgs) ->
+                  MasterRef = make_ref(),
+                  ChildRefs = maps:fold(fun(Dest, Msg, Acc) ->
+                                           SName = monitor_suitable_name(Dest),
+                                           Ref = monitor(process, SName),
+                                           From = ?FROM(self(), Ref),
+                                           do_send(Dest, ?MSG(From, Msg)),
+                                           maps:put(Ref, Dest, Acc)
+                                   end, #{}, Msgs),
+                  TimerRef = case Timeout of
+                                 infinity ->
+                                     undefined;
+                                 T ->
+                                     erlang:send_after(T, self(), ?FAIL(MasterRef, timeout))
+                             end,
+                  #await{master_ref=MasterRef,
+                         timer_ref=TimerRef,
+                         child_refs=ChildRefs}
+          end,
+    maps:map(Fun, TaggedMsgs).
 
 %% -----------------------------------------------------------------
 %% Send functions

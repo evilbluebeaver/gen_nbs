@@ -73,8 +73,6 @@
 -callback init(Args :: term()) ->
     {ok, State :: term()} | {ok, State :: term(), timeout() | hibernate} |
     {stop, Reason :: term()} | ignore.
--callback handle_call(Message :: term(), From :: from(), State :: term()) ->
-    callback_result().
 -callback handle_msg(Message :: term(), From :: from(), State :: term()) ->
     callback_result().
 -callback handle_ack({ack, Ack :: term()} | {fail, Reason :: term()}, Tag :: term(), State :: term()) ->

@@ -37,11 +37,12 @@
 -define(TEST_FORMAT_MODULE, test_nbs_format).
 
 -define(CHECK_AFTER,
-    receive
-        Else -> {fail, [Test, Else]}
-    after ?TIMEOUT ->
-              ok
-    end).
+        receive
+            Else ->
+                {fail, [Test, Else]}
+        after ?TIMEOUT ->
+                  ok
+        end).
 -define(WAIT_FOR_MSG(MSG),
         receive
             MSG ->
@@ -67,6 +68,7 @@ all() ->
     [test_start,
      {group, enter_loop},
      {group, messages},
+     test_multimsg,
      test_await,
      test_format_status,
      test_sys].
@@ -336,23 +338,31 @@ test_abcast(_Config) ->
     ok.
 
 test_multimsg(_Config) ->
-    {ok, Pid} = gen_nbs:start_link({local, test_name}, ?TEST_MODULE, {notify, self()}, []),
-    gen_nbs:multimsg(test_name, message, tag),
-    Self = self(),
-    ?WAIT_FOR_MSG({Pid, {msg, message, Self}}),
-    gen_nbs:multimsg([node()], test_name, message, tag),
-    ?WAIT_FOR_MSG({Pid, {msg, message, Self}}),
-    gen_nbs:multimsg(test_name, message, tag, infinity),
-    ?WAIT_FOR_MSG({Pid, {msg, message, Self}}),
-    gen_nbs:multimsg([node()], test_name, message, tag, infinity),
-    ?WAIT_FOR_MSG({Pid, {msg, message, Self}}),
-    gen_nbs:stop(Pid),
-    Node = node(),
-    ?WAIT_FOR_DOWN({test_name, Node}),
-    ?WAIT_FOR_DOWN({test_name, Node}),
-    ?WAIT_FOR_DOWN({test_name, Node}),
-    ?WAIT_FOR_DOWN({test_name, Node}),
-    ?WAIT_FOR_EXIT(Pid),
+    {ok, Pid1} = gen_nbs:start(?TEST_MODULE, {notify, self()}, []),
+    {ok, Pid2} = gen_nbs:start(?TEST_MODULE, {notify, self()}, []),
+    {ok, Pid3} = gen_nbs:start(?TEST_MODULE, {notify, self()}, []),
+
+    gen_nbs:cast(Pid1, {multimsg, #{Pid2 => {ack, ack}, Pid3 => {ack, ack}}}),
+    ?WAIT_FOR_MSG({Pid3, {msg, ack, Pid1}}),
+    ?WAIT_FOR_MSG({Pid2, {msg, ack, Pid1}}),
+    timer:sleep(?TIMEOUT),
+    ?WAIT_FOR_MSG({Pid1, ack}),
+
+    gen_nbs:cast(Pid1, {multimsg, #{Pid2 => {ack, ack}, Pid3 => {ack, ack}}, infinity}),
+    ?WAIT_FOR_MSG({Pid3, {msg, ack, Pid1}}),
+    ?WAIT_FOR_MSG({Pid2, {msg, ack, Pid1}}),
+    timer:sleep(?TIMEOUT),
+    ?WAIT_FOR_MSG({Pid1, ack}),
+
+    gen_nbs:cast(Pid1, {multimsg, #{Pid2 => unknown, Pid3 => unknown}, ?TIMEOUT}),
+    ?WAIT_FOR_MSG({Pid2, {msg, unknown, Pid1}}),
+    ?WAIT_FOR_MSG({Pid3, {msg, unknown, Pid1}}),
+    timer:sleep(?TIMEOUT),
+    ?WAIT_FOR_MSG({Pid1, ack}),
+
+    gen_nbs:stop(Pid1),
+    gen_nbs:stop(Pid2),
+    gen_nbs:stop(Pid3),
     ok.
 
 test_error(_Config) ->
@@ -431,11 +441,13 @@ test_send(_Config) ->
 
 test_await(_Config) ->
     {ok, Pid1} = gen_nbs:start(?TEST_MODULE, [], []),
-    {[], [{tag1, fail}]} = gen_nbs:await(gen_nbs:msg(Pid1, {fail}, tag1)),
-    {[{tag2, ok}, {tag1, ok}], []} = gen_nbs:await([gen_nbs:msg(Pid1, {ack, ok}, tag1),
-                                            gen_nbs:msg(Pid1, {ack, ok}, tag2)]),
-    {[], [{tag1, down}]} = gen_nbs:await(gen_nbs:msg(Pid1, {down}, tag1)),
-    {[], [{tag1, down}]} = gen_nbs:await(gen_nbs:msg(Pid1, {down}, tag1, 0)),
+    {ok, Pid2} = gen_nbs:start(?TEST_MODULE, [], []),
+    #{tag := #{Pid1 := {ack, ok},
+               Pid2 := {ack, ok}}} = gen_nbs:await(gen_nbs:multimsg(#{tag => #{Pid1 => {ack, ok},
+                                                                               Pid2 => {ack, ok}}})),
+    #{tag := {fail, fail}} = gen_nbs:await(gen_nbs:msg(Pid1, {fail}, tag)),
+    #{tag := {fail, down}} = gen_nbs:await(gen_nbs:msg(Pid1, {down}, tag)),
+    gen_nbs:stop(Pid2),
     ok.
 
 test_msg(_Config) ->
@@ -533,15 +545,6 @@ test_msg(_Config) ->
     ?WAIT_FOR_MSG({Pid2, {msg, Msg, Pid1}}),
     timer:sleep(?TIMEOUT),
     ?WAIT_FOR_MSG({Pid1, fail}),
-
-    %%
-    %% Multiple msgs
-    %%
-    gen_nbs:cast(Pid1, {msg_multiple, Msg, Pid2, ?TIMEOUT}),
-    ?WAIT_FOR_MSG({Pid2, {msg, Msg, Pid1}}),
-    ?WAIT_FOR_MSG({Pid2, {msg, Msg, Pid1}}),
-    ?WAIT_FOR_MSG({Pid1, ack}),
-    ?WAIT_FOR_MSG({Pid1, ack}),
 
     %%
     %% Post with no ack needed (unexisting_process)

@@ -221,28 +221,37 @@ fail(?FROM(From, Ref), Reason) ->
 await(Await) when is_map(Await) ->
     Refs = gen_nbs_refs:new(),
     Refs1 = gen_nbs_refs:reg(Await, Refs),
-    do_receive(Refs1, #{}).
+    RefsKeys = gen_nbs_refs:refs(Refs1),
+    do_receive(RefsKeys, Refs1, #{}).
 
 
-do_receive(Refs, Results) ->
+do_receive([], _Refs, Results) ->
+    Results;
+
+do_receive([Ref | T], Refs, Results) ->
     case maps:size(Refs) of
         0 ->
             Results;
         _ ->
-            {Ref, Result, Reason} = receive
-                                        {'DOWN', R, process, _Pid, _Info} ->
-                                            {R, fail, down};
-                                        ?ACK(R, RResult, RReason) ->
-                                            {R, RResult, RReason}
-                                    end,
+            {Result, Msg} = receive
+                                ?ACK(Ref, R, M) ->
+                                    {R, M}
+                            after 0 ->
+                                      receive
+                                          {'DOWN', Ref, process, _Pid, _Info} ->
+                                              {fail, down};
+                                          ?ACK(Ref, R, M) ->
+                                              {R, M}
+                                      end
+                            end,
             true = demonitor(Ref),
-            case gen_nbs_refs:use(Result, Reason, Ref, Refs) of
+            case gen_nbs_refs:use(Result, Msg, Ref, Refs) of
                 {ok, Refs1} ->
-                    do_receive(Refs1, Results);
+                    do_receive(T, Refs1, Results);
                 {ack, Ack, Tag, TimerRef, Refs1} ->
                     cancel_timer(TimerRef),
                     ?CLEAN(Ref),
-                    do_receive(Refs1, maps:put(Tag, Ack, Results))
+                    do_receive(T, Refs1, maps:put(Tag, Ack, Results))
             end
     end.
 

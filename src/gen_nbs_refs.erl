@@ -2,7 +2,8 @@
 
 -export([new/0,
          use/4,
-         reg/2]).
+         reg/2,
+         refs/1]).
 
 -include("gen_nbs_await.hrl").
 
@@ -10,6 +11,17 @@
 
 new() ->
     #{}.
+
+refs(Refs) ->
+    L = maps:to_list(Refs),
+    Fun = fun({_, #await_ref{child_refs=undefined}},
+              {_, _}) ->
+                  true;
+             (_, _) ->
+                  false
+          end,
+    {Keys, _} = lists:unzip(lists:sort(Fun, L)),
+    Keys.
 
 use(Result, Reason, Ref, Refs) when is_reference(Ref) ->
     case maps:find(Ref, Refs) of

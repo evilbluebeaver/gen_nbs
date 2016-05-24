@@ -442,11 +442,11 @@ test_send(_Config) ->
 test_await(_Config) ->
     {ok, Pid1} = gen_nbs:start(?TEST_MODULE, [], []),
     {ok, Pid2} = gen_nbs:start(?TEST_MODULE, [], []),
-    #{tag := #{Pid1 := {ack, ok},
-               Pid2 := {ack, ok}}} = gen_nbs:await(gen_nbs:multimsg(#{tag => #{Pid1 => {ack, ok},
-                                                                               Pid2 => {ack, ok}}})),
-    #{tag := {fail, fail}} = gen_nbs:await(gen_nbs:msg(Pid1, {fail}, tag)),
-    #{tag := {fail, down}} = gen_nbs:await(gen_nbs:msg(Pid1, {down}, tag)),
+    #{Pid1 := {ack, ok},
+            Pid2 := {ack, ok}} = gen_nbs:await(fun(Tag) -> gen_nbs:multimsg(#{Pid1 => {ack, ok},
+                                                                            Pid2 => {ack, ok}}, Tag) end),
+    {fail, fail} = gen_nbs:await(fun(Tag) -> gen_nbs:msg(Pid1, {fail}, Tag) end),
+    {fail, down} = gen_nbs:await(fun(Tag) -> gen_nbs:msg(Pid1, {down}, Tag) end),
     gen_nbs:stop(Pid2),
     ok.
 
@@ -526,9 +526,10 @@ test_msg(_Config) ->
     %%
     %% Msg await timeout
     %%
-    gen_nbs:cast(Pid1, {msg_await_timeout, ?TIMEOUT}),
+    gen_nbs:cast(Pid1, {msg_await_timeout, Msg, Pid2, ?TIMEOUT}),
+    ?WAIT_FOR_MSG({Pid2, {msg, Msg, Pid1}}),
     timer:sleep(?TIMEOUT),
-    ?WAIT_FOR_MSG({Pid1, {info, timeout}}),
+    ?WAIT_FOR_MSG({Pid1, ack}),
 
     %%
     %% Manual ack

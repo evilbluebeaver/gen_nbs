@@ -73,24 +73,22 @@ use(Result, Reason, Ref, #await_ref{master_ref=MasterRef,
     end.
 
 
-reg(Awaits, Refs)  when is_map(Awaits) ->
-    maps:fold(fun reg_fold/3, Refs, Awaits).
-
-reg_fold(Tag, #await{master_ref=MasterRef,
-                     child_refs=ChildRefs,
-                     timer_ref=TimerRef}, Acc) ->
-    Acc1 = maps:put(MasterRef, #await_ref{timer_ref=TimerRef,
+reg(#await{master_ref=MasterRef,
+           tag=Tag,
+           child_refs=ChildRefs,
+           timer_ref=TimerRef}, Refs) ->
+    Refs1 = maps:put(MasterRef, #await_ref{timer_ref=TimerRef,
                                           tag=Tag,
-                                          child_refs=ChildRefs}, Acc),
-    ChildFun = fun(Ref, ChildTag, RAcc) ->
+                                          child_refs=ChildRefs}, Refs),
+    ChildFun = fun(Ref, ChildTag, Acc) ->
                        maps:put(Ref, #await_ref{tag=ChildTag,
                                                 master_ref=MasterRef},
-                                RAcc)
+                                Acc)
                end,
     case ChildRefs of
         undefined ->
-            Acc1;
+            Refs1;
         ChildRefs ->
-            maps:fold(ChildFun, Acc1, ChildRefs)
+            maps:fold(ChildFun, Refs1, ChildRefs)
     end.
 

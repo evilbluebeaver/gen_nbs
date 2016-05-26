@@ -269,12 +269,12 @@ multimsg(Msgs, Tag) when is_map(Msgs)->
 
 multimsg(Msgs, Tag, Timeout) when is_map(Msgs) ->
     MasterRef = make_ref(),
-    ChildRefs = maps:fold(fun(Dest, Msg, Acc) ->
+    ChildRefs = maps:fold(fun(ChildTag, {Dest, Msg}, Acc) ->
                                   SName = monitor_suitable_name(Dest),
                                   Ref = monitor(process, SName),
                                   From = ?FROM(self(), Ref),
                                   do_send(Dest, ?MSG(From, Msg)),
-                                  maps:put(Ref, Dest, Acc)
+                                  maps:put(Ref, ChildTag, Acc)
                           end, #{}, Msgs),
     TimerRef = case Timeout of
                    infinity ->

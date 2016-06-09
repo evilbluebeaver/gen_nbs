@@ -92,6 +92,9 @@ handle_cast({fail, To}, State) ->
 handle_cast({fail, To, Timeout}, State) ->
     Await = gen_nbs:msg(To, {fail, Timeout}, tag),
     {await, Await, State};
+handle_cast({multiple_awaits, Msg, To}, State) ->
+    Awaits = [gen_nbs:msg(To, {ack, Msg}, tag)],
+    {await, Awaits, State};
 handle_cast(Msg, State={notify, Pid}) ->
     Pid ! {self(), {cast, Msg}},
     {ok, State}.

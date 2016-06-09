@@ -186,7 +186,7 @@ msg(Dest, Msg, Tag, Timeout) ->
                        erlang:send_after(T, self(), ?FAIL(Ref, timeout))
                end,
     From = ?FROM(self(), Ref),
-    do_send(Dest, ?MSG(From, Msg)),
+    do_send(SName, ?MSG(From, Msg)),
     #await{master_ref=Ref,
            tag=Tag,
            timer_ref=TimerRef}.

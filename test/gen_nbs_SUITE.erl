@@ -572,6 +572,14 @@ test_msg(_Config) ->
     gen_nbs:cast(Pid1, {msg_no_ack, Msg, {test_local_name, node()}, infinity}),
     ?WAIT_FOR_MSG({Pid3, {msg, Msg, Pid1}}),
 
+    %%
+    %% Manual ack
+    %%
+    gen_nbs:cast(Pid1, {multiple_awaits, Msg, Pid2}),
+    ?WAIT_FOR_MSG({Pid2, {msg, Msg, Pid1}}),
+    timer:sleep(2 * ?TIMEOUT),
+    ?WAIT_FOR_MSG({Pid1, ack}),
+
     gen_nbs:stop(Pid1),
     gen_nbs:stop(Pid2),
     gen_nbs:stop(Pid3),

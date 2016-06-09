@@ -73,6 +73,9 @@ use(Result, Reason, Ref, #await_ref{master_ref=MasterRef,
     end.
 
 
+reg(Awaits, Refs) when is_list(Awaits) ->
+    lists:foldl(fun(Await, Acc) -> reg(Await, Acc) end, Refs, Awaits);
+
 reg(#await{master_ref=MasterRef,
            tag=Tag,
            child_refs=ChildRefs,

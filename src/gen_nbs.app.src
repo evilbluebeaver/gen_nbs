@@ -1,6 +1,6 @@
 {application, 'gen_nbs',
  [{description, "Non-blocking server"},
-  {vsn, "0.4.4"},
+  {vsn, "0.4.5"},
   {registered, []},
   {applications,
    [kernel,

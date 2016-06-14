@@ -59,6 +59,9 @@ handle_cast(stop, State) ->
 handle_cast({multimsg, Msgs}, State) ->
     Await = gen_nbs:multimsg(Msgs, tag),
     {await, Await, State};
+handle_cast({multimsg_complete, Msgs, Complete}, State) ->
+    Await = gen_nbs:multimsg(Msgs, tag, Complete),
+    {await, Await, State};
 handle_cast({multimsg, Msgs, Timeout}, State) ->
     Await = gen_nbs:multimsg(Msgs, tag, Timeout),
     {await, Await, State};
@@ -95,6 +98,9 @@ handle_cast({fail, To, Timeout}, State) ->
 handle_cast({multiple_awaits, Msg, To}, State) ->
     Awaits = [gen_nbs:msg(To, {ack, Msg}, tag)],
     {await, Awaits, State};
+handle_cast({msg_ack_complete, Msg, To, Complete}, State) ->
+    Await = gen_nbs:msg(To, {ack, Msg}, tag, Complete),
+    {await, Await, State};
 handle_cast(Msg, State={notify, Pid}) ->
     Pid ! {self(), {cast, Msg}},
     {ok, State}.
@@ -133,11 +139,11 @@ handle_msg({down}, _From, State) ->
 handle_msg({ack, Res}, From, State) ->
     {ack, From, Res, State}.
 
-handle_ack(_Map, tag, State={notify, Pid}) when is_map(_Map) ->
-    Pid ! {self(), ack},
+handle_ack(Map, tag, State={notify, Pid}) when is_map(Map) ->
+    Pid ! {self(), Map},
     {ok, State};
-handle_ack({ack, ok}, tag, State={notify, Pid}) ->
-    Pid ! {self(), ack},
+handle_ack({ack, Ack}, tag, State={notify, Pid}) ->
+    Pid ! {self(), Ack},
     {ok, State};
 
 handle_ack({fail, _Reason}, tag, State={notify, Pid}) ->

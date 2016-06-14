@@ -342,23 +342,30 @@ test_multimsg(_Config) ->
     {ok, Pid2} = gen_nbs:start(?TEST_MODULE, {notify, self()}, []),
     {ok, Pid3} = gen_nbs:start(?TEST_MODULE, {notify, self()}, []),
 
-    gen_nbs:cast(Pid1, {multimsg, #{Pid2 => {Pid2, {ack, ack}}, Pid3 => {Pid3, {ack, ack}}}}),
-    ?WAIT_FOR_MSG({Pid3, {msg, ack, Pid1}}),
-    ?WAIT_FOR_MSG({Pid2, {msg, ack, Pid1}}),
+    gen_nbs:cast(Pid1, {multimsg, #{Pid2 => {Pid2, {ack, ok}}, Pid3 => {Pid3, {ack, ok}}}}),
+    ?WAIT_FOR_MSG({Pid3, {msg, ok, Pid1}}),
+    ?WAIT_FOR_MSG({Pid2, {msg, ok, Pid1}}),
     timer:sleep(?TIMEOUT),
-    ?WAIT_FOR_MSG({Pid1, ack}),
+    ?WAIT_FOR_MSG({Pid1, #{Pid2 := {ack, ok}, Pid3 := {ack, ok}}}),
 
-    gen_nbs:cast(Pid1, {multimsg, #{Pid2 => {Pid2, {ack, ack}}, Pid3 => {Pid3, {ack, ack}}}, infinity}),
-    ?WAIT_FOR_MSG({Pid3, {msg, ack, Pid1}}),
-    ?WAIT_FOR_MSG({Pid2, {msg, ack, Pid1}}),
+    gen_nbs:cast(Pid1, {multimsg, #{Pid2 => {Pid2, {ack, ok}}, Pid3 => {Pid3, {ack, ok}}}, infinity}),
+    ?WAIT_FOR_MSG({Pid3, {msg, ok, Pid1}}),
+    ?WAIT_FOR_MSG({Pid2, {msg, ok, Pid1}}),
     timer:sleep(?TIMEOUT),
-    ?WAIT_FOR_MSG({Pid1, ack}),
+    ?WAIT_FOR_MSG({Pid1, #{Pid2 := {ack, ok}, Pid3 := {ack, ok}}}),
 
     gen_nbs:cast(Pid1, {multimsg, #{Pid2 => {Pid2, unknown}, Pid3 => {Pid3, unknown}}, ?TIMEOUT}),
     ?WAIT_FOR_MSG({Pid2, {msg, unknown, Pid1}}),
     ?WAIT_FOR_MSG({Pid3, {msg, unknown, Pid1}}),
     timer:sleep(?TIMEOUT),
-    ?WAIT_FOR_MSG({Pid1, ack}),
+    ?WAIT_FOR_MSG({Pid1, #{Pid2 := {fail, timeout}, Pid3 := {fail, timeout}}}),
+
+    gen_nbs:cast(Pid1, {multimsg_complete, #{Pid2 => {Pid2, {ack, ok}}, Pid3 => {Pid3, {ack, ok}}},
+                                             fun(_) -> {ack, ok} end}),
+    ?WAIT_FOR_MSG({Pid2, {msg, ok, Pid1}}),
+    ?WAIT_FOR_MSG({Pid3, {msg, ok, Pid1}}),
+    timer:sleep(?TIMEOUT),
+    ?WAIT_FOR_MSG({Pid1, ok}),
 
     gen_nbs:stop(Pid1),
     gen_nbs:stop(Pid2),
@@ -491,7 +498,7 @@ test_msg(_Config) ->
     gen_nbs:cast(Pid1, {msg_ack_timeout, Msg, Pid2, infinity}),
     ?WAIT_FOR_MSG({Pid2, {msg, Msg, Pid1}}),
     timer:sleep(?TIMEOUT),
-    ?WAIT_FOR_MSG({Pid1, ack}),
+    ?WAIT_FOR_MSG({Pid1, ok}),
 
     %%
     %% Successful ack
@@ -499,7 +506,7 @@ test_msg(_Config) ->
     gen_nbs:cast(Pid1, {msg_ack, Msg, Pid2}),
     ?WAIT_FOR_MSG({Pid2, {msg, Msg, Pid1}}),
     timer:sleep(?TIMEOUT),
-    ?WAIT_FOR_MSG({Pid1, ack}),
+    ?WAIT_FOR_MSG({Pid1, ok}),
 
     %%
     %% Long ack
@@ -514,7 +521,7 @@ test_msg(_Config) ->
     %%
     gen_nbs:cast(Pid1, {msg_ack_timeout, Msg, Pid2, ?TIMEOUT}),
     ?WAIT_FOR_MSG({Pid2, {msg, Msg, Pid1}}),
-    ?WAIT_FOR_MSG({Pid1, ack}),
+    ?WAIT_FOR_MSG({Pid1, ok}),
     timer:sleep(?TIMEOUT),
     ?WAIT_FOR_MSG({Pid2, {info, timeout}}),
 
@@ -530,7 +537,7 @@ test_msg(_Config) ->
     gen_nbs:cast(Pid1, {msg_await_timeout, Msg, Pid2, ?TIMEOUT}),
     ?WAIT_FOR_MSG({Pid2, {msg, Msg, Pid1}}),
     timer:sleep(?TIMEOUT),
-    ?WAIT_FOR_MSG({Pid1, ack}),
+    ?WAIT_FOR_MSG({Pid1, ok}),
 
     %%
     %% Manual ack
@@ -538,7 +545,7 @@ test_msg(_Config) ->
     gen_nbs:cast(Pid1, {msg_manual_ack, Msg, Pid2}),
     ?WAIT_FOR_MSG({Pid2, {msg, Msg, Pid1}}),
     timer:sleep(2 * ?TIMEOUT),
-    ?WAIT_FOR_MSG({Pid1, ack}),
+    ?WAIT_FOR_MSG({Pid1, ok}),
 
     %%
     %% Manual fail
@@ -573,12 +580,17 @@ test_msg(_Config) ->
     ?WAIT_FOR_MSG({Pid3, {msg, Msg, Pid1}}),
 
     %%
-    %% Manual ack
+    %% Multiple awaits
     %%
     gen_nbs:cast(Pid1, {multiple_awaits, Msg, Pid2}),
     ?WAIT_FOR_MSG({Pid2, {msg, Msg, Pid1}}),
     timer:sleep(2 * ?TIMEOUT),
-    ?WAIT_FOR_MSG({Pid1, ack}),
+    ?WAIT_FOR_MSG({Pid1, ok}),
+
+    gen_nbs:cast(Pid1, {msg_ack_complete, Msg, Pid2, fun(_) -> {ack, completed} end}),
+    ?WAIT_FOR_MSG({Pid2, {msg, Msg, Pid1}}),
+    timer:sleep(?TIMEOUT),
+    ?WAIT_FOR_MSG({Pid1, completed}),
 
     gen_nbs:stop(Pid1),
     gen_nbs:stop(Pid2),

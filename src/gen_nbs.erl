@@ -100,8 +100,8 @@
 -define(SUCCESS(Ref, Ack),      ?ACK(Ref, ack, Ack)).
 -define(FAIL(Ref, Reason),      ?ACK(Ref, fail, Reason)).
 
--define(CAST(Msg),          {'$gen_cast', Msg}).
--define(MSG(From, Msg),     {'$gen_msg',  From, Msg}).
+-define(CAST(Msg),        {'$gen_cast', Msg}).
+-define(MSG(From, Msg),   {'$gen_msg',  From, Msg}).
 
 -define(OK_RET(State),      {ok, State}).
 -define(ACK_RET(Tag),       {ack, Tag}).
@@ -174,9 +174,19 @@ cast(Dest, Msg) ->
 
 -spec msg(Dest :: dest(), Msg :: term(), Tag :: term()) -> await().
 msg(Dest, Msg, Tag) ->
-    msg(Dest, Msg, Tag, ?DEFAULT_TIMEOUT).
--spec msg(Dest :: dest(), Msg :: term(), Tag :: term(), Timeout :: timeout()) -> await().
+    msg(Dest, Msg, Tag, undefined, ?DEFAULT_TIMEOUT).
+-spec msg(Dest :: dest(), Msg :: term(), Tag :: term(),
+          fun((term()) -> term()) | timeout()) -> await().
+
+msg(Dest, Msg, Tag, CompleteFun) when is_function(CompleteFun) ->
+    msg(Dest, Msg, Tag, CompleteFun, ?DEFAULT_TIMEOUT);
+
 msg(Dest, Msg, Tag, Timeout) ->
+    msg(Dest, Msg, Tag, undefined, Timeout).
+
+-spec msg(Dest :: dest(), Msg :: term(), Tag :: term(),
+          CompleteFun :: fun((term()) -> term()), Timeout :: timeout()) -> await().
+msg(Dest, Msg, Tag, CompleteFun, Timeout) ->
     SName = monitor_suitable_name(Dest),
     Ref = monitor(process, SName),
     TimerRef = case Timeout of
@@ -186,9 +196,10 @@ msg(Dest, Msg, Tag, Timeout) ->
                        erlang:send_after(T, self(), ?FAIL(Ref, timeout))
                end,
     From = ?FROM(self(), Ref),
-    do_send(SName, ?MSG(From, Msg)),
+    do_send(Dest, ?MSG(From, Msg)),
     #await{master_ref=Ref,
            tag=Tag,
+           complete_fun=CompleteFun,
            timer_ref=TimerRef}.
 
 %% -----------------------------------------------------------------
@@ -265,9 +276,14 @@ abcast(Nodes, Name, Msg) when is_list(Nodes), is_atom(Name) ->
     abcast.
 
 multimsg(Msgs, Tag) when is_map(Msgs)->
-    multimsg(Msgs, Tag, ?DEFAULT_TIMEOUT).
+    multimsg(Msgs, Tag, undefined, ?DEFAULT_TIMEOUT).
 
+multimsg(Msgs, Tag, CompleteFun) when is_map(Msgs), is_function(CompleteFun) ->
+    multimsg(Msgs, Tag, CompleteFun, ?DEFAULT_TIMEOUT);
 multimsg(Msgs, Tag, Timeout) when is_map(Msgs) ->
+    multimsg(Msgs, Tag, undefined, Timeout).
+
+multimsg(Msgs, Tag, CompleteFun, Timeout) when is_map(Msgs) ->
     MasterRef = make_ref(),
     ChildRefs = maps:fold(fun(ChildTag, {Dest, Msg}, Acc) ->
                                   SName = monitor_suitable_name(Dest),
@@ -285,6 +301,7 @@ multimsg(Msgs, Tag, Timeout) when is_map(Msgs) ->
     #await{master_ref=MasterRef,
            timer_ref=TimerRef,
            tag=Tag,
+           complete_fun=CompleteFun,
            child_refs=ChildRefs}.
 
 %% -----------------------------------------------------------------

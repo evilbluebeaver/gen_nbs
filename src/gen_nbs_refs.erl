@@ -7,7 +7,7 @@
 
 -include("gen_nbs_await.hrl").
 
--record(await_ref, {timer_ref, tag, master_ref, child_refs, results=#{}}).
+-record(await_ref, {timer_ref, tag, complete_fun, master_ref, child_refs, results=#{}}).
 
 new() ->
     #{}.
@@ -23,6 +23,11 @@ refs(Refs) ->
     {Keys, _} = lists:unzip(lists:sort(Fun, L)),
     Keys.
 
+complete(undefined, Ack) ->
+    Ack;
+complete(Fun, Ack) ->
+    Fun(Ack).
+
 use(Result, Reason, Ref, Refs) when is_reference(Ref) ->
     case maps:find(Ref, Refs) of
         error ->
@@ -33,13 +38,15 @@ use(Result, Reason, Ref, Refs) when is_reference(Ref) ->
     end.
 
 use(Result, Reason, _Ref, #await_ref{tag=Tag,
+                                     complete_fun=CompleteFun,
                                      timer_ref=TimerRef,
                                      master_ref=undefined,
                                      child_refs=undefined}, Refs) ->
-    {ack, {Result, Reason}, Tag, TimerRef, Refs};
+    {ack, complete(CompleteFun, {Result, Reason}), Tag, TimerRef, Refs};
 
 use(fail, Reason, _Ref, #await_ref{timer_ref=TimerRef,
                                    tag=Tag,
+                                   complete_fun=CompleteFun,
                                    master_ref=undefined,
                                    child_refs=ChildRefs,
                                    results=Results}, Refs) ->
@@ -48,13 +55,14 @@ use(fail, Reason, _Ref, #await_ref{timer_ref=TimerRef,
                    maps:put(ChildTag, {fail, Reason}, ResultsAcc)}
           end,
     {Refs1, Results1} = maps:fold(Fun, {Refs, Results}, ChildRefs),
-    {ack, Results1, Tag, TimerRef, Refs1};
+    {ack, complete(CompleteFun, Results1), Tag, TimerRef, Refs1};
 
 use(Result, Reason, Ref, #await_ref{master_ref=MasterRef,
                                     child_refs=undefined,
                                     tag=Tag}, Refs) ->
     MasterRefValue=#await_ref{child_refs=ChildRefs,
                               tag=MasterTag,
+                              complete_fun=CompleteFun,
                               master_ref=undefined,
                               timer_ref=TimerRef,
                               results=Results} = maps:get(MasterRef, Refs),
@@ -62,7 +70,8 @@ use(Result, Reason, Ref, #await_ref{master_ref=MasterRef,
     ChildRefs1 = maps:remove(Ref, ChildRefs),
     case maps:size(ChildRefs1) of
         0 ->
-            {ack, Results1, MasterTag, TimerRef, maps:remove(MasterRef, Refs)};
+            {ack, complete(CompleteFun, Results1), MasterTag, TimerRef,
+             maps:remove(MasterRef, Refs)};
         _ ->
 
             Refs1 = maps:update(MasterRef,
@@ -78,11 +87,13 @@ reg(Awaits, Refs) when is_list(Awaits) ->
 
 reg(#await{master_ref=MasterRef,
            tag=Tag,
+           complete_fun=CompleteFun,
            child_refs=ChildRefs,
            timer_ref=TimerRef}, Refs) ->
     Refs1 = maps:put(MasterRef, #await_ref{timer_ref=TimerRef,
-                                          tag=Tag,
-                                          child_refs=ChildRefs}, Refs),
+                                           tag=Tag,
+                                           complete_fun=CompleteFun,
+                                           child_refs=ChildRefs}, Refs),
     ChildFun = fun(Ref, ChildTag, Acc) ->
                        maps:put(Ref, #await_ref{tag=ChildTag,
                                                 master_ref=MasterRef},

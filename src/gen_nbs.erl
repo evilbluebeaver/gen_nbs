@@ -196,11 +196,11 @@ msg(Dest, Msg, Tag, CompleteFun, Timeout) ->
                        erlang:send_after(T, self(), ?FAIL(Ref, timeout))
                end,
     From = ?FROM(self(), Ref),
-    do_send(Dest, ?MSG(From, Msg)),
-    #await{master_ref=Ref,
-           tag=Tag,
-           complete_fun=CompleteFun,
-           timer_ref=TimerRef}.
+    do_send(Dest, ?MSG(From, Msg)).
+    %#await{master_ref=Ref,
+           %tag=Tag,
+           %complete_fun=CompleteFun,
+           %timer_ref=TimerRef}.
 
 %% -----------------------------------------------------------------
 %% Manual ack/fail
@@ -297,12 +297,12 @@ multimsg(Msgs, Tag, CompleteFun, Timeout) when is_map(Msgs) ->
                        undefined;
                    T ->
                        erlang:send_after(T, self(), ?FAIL(MasterRef, timeout))
-               end,
-    #await{master_ref=MasterRef,
-           timer_ref=TimerRef,
-           tag=Tag,
-           complete_fun=CompleteFun,
-           child_refs=ChildRefs}.
+               end.
+    %#await{master_ref=MasterRef,
+           %timer_ref=TimerRef,
+           %tag=Tag,
+           %complete_fun=CompleteFun,
+           %child_refs=ChildRefs}.
 
 %% -----------------------------------------------------------------
 %% Send functions

@@ -640,6 +640,11 @@ test_await(_Config) ->
     ?WAIT_FOR_MSG({Pid1, {ack, msg1, _}}),
     ?WAIT_FOR_MSG({Pid2, {long_ack, msg2, _}}),
 
+    CompletionFun = fun(#{tag1 := D}) ->  D end,
+    Package4 = gen_nbs:package(#{tag1 => gen_nbs:msg(Pid1, {ack, msg1})},
+                               CompletionFun),
+    {ack, msg1} = gen_nbs:await(Package4),
+    ?WAIT_FOR_MSG({Pid1, {ack, msg1, _}}),
     gen_nbs:stop(Pid1),
     gen_nbs:stop(Pid2),
     ok.

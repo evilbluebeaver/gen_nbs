@@ -24,7 +24,7 @@
          abcast/2, abcast/3,
          stop/1, stop/3,
          msg/2, msg/3, package/1, package/2,
-         transmit/2, transmit/3, transmit/4,
+         transmit/2, transmit/3,
          cast/2,
          await/1,
          ack/2, fail/2,
@@ -190,15 +190,9 @@ package(Msgs, CompletionFun) when is_map(Msgs), is_function(CompletionFun)->
 %% -----------------------------------------------------------------
 
 transmit(Msgs, Tag) ->
-    transmit(Msgs, Tag, undefined, ?DEFAULT_TIMEOUT).
+    transmit(Msgs, Tag, ?DEFAULT_TIMEOUT).
 
-transmit(Msgs, Tag, CompletionFun) when is_function(CompletionFun) ->
-    transmit(Msgs, Tag, CompletionFun, ?DEFAULT_TIMEOUT);
-
-transmit(Msgs, Tag, Timeout) ->
-    transmit(Msgs, Tag, undefined, Timeout).
-
-transmit(Msg, Tag, _CompletionFun, Timeout) ->
+transmit(Msg, Tag, Timeout) ->
     Ref = do_transmit(Msg),
     TimerRef = erlang:send_after(Timeout, self(), ?FAIL(Ref#ref.ref, timeout)),
     #await{tag=Tag,

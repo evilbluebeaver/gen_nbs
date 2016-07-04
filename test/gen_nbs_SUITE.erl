@@ -442,7 +442,7 @@ test_transmit(_Config) ->
     {ok, Pid3} = gen_nbs:start({local, test_local_name}, ?TEST_MODULE, {notify, self()}, [{debug, [trace]}]),
     {ok, Pid4} = gen_nbs:start({global, test_global_name}, ?TEST_MODULE, {notify, self()}, [{debug, [trace]}]),
 
-    CompletionFun = fun(D) -> D end,
+    CompletionFun = fun(D) -> {ok, D} end,
 
     %%
     %% Fail
@@ -557,13 +557,6 @@ test_transmit(_Config) ->
     timer:sleep(3 * ?TIMEOUT),
     ?WAIT_FOR_MSG({Pid1, #{tag1 := #{tag11 := {fail, timeout},
                                      tag12 := {fail, timeout}}}}),
-    %%
-    %% Ack (completion fun)
-    %%
-    gen_nbs:cast(Pid1, {transmit, gen_nbs:msg(Pid2, {ack, msg}), CompletionFun}),
-    ?WAIT_FOR_MSG({Pid2, {ack, msg, Pid1}}),
-    timer:sleep(?TIMEOUT),
-    ?WAIT_FOR_MSG({Pid1, {ack, msg}}),
 
     %%
     %% Manual fail
@@ -615,7 +608,7 @@ test_transmit(_Config) ->
     gen_nbs:cast(Pid1, {transmit, gen_nbs:msg(Pid2, {ack, msg}, CompletionFun)}),
     ?WAIT_FOR_MSG({Pid2, {ack, msg, Pid1}}),
     timer:sleep(?TIMEOUT),
-    ?WAIT_FOR_MSG({Pid1, {ack, msg}}),
+    ?WAIT_FOR_MSG({Pid1, {ok, {ack, msg}}}),
     gen_nbs:stop(Pid1),
     gen_nbs:stop(Pid2),
     gen_nbs:stop(Pid3),

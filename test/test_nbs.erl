@@ -46,6 +46,18 @@ code_change(_, State, normal) ->
 code_change(_, _State, error) ->
     error.
 
+handle_cast({transmit_timeout, Msg, Timeout}, State) ->
+    Await = gen_nbs:transmit(Msg, make_ref(), 2 * Timeout),
+    {await, Await, State, Timeout};
+
+handle_cast({transmit, Msg}, State) ->
+    Await = gen_nbs:transmit(Msg, make_ref()),
+    {await, Await, State};
+
+handle_cast({transmit, Msg, Timeout}, State) ->
+    Await = gen_nbs:transmit(Msg, make_ref(), Timeout),
+    {await, Await, State};
+
 handle_cast(exit, _State) ->
     exit(some_error);
 handle_cast(error, _State) ->
@@ -56,98 +68,47 @@ handle_cast({timeout, Timeout}, State) ->
     {ok, State, Timeout};
 handle_cast(stop, State) ->
     {stop, normal, State};
-handle_cast({multimsg, Msgs}, State) ->
-    Await = gen_nbs:multimsg(Msgs, tag),
-    {await, Await, State};
-handle_cast({multimsg_complete, Msgs, Complete}, State) ->
-    Await = gen_nbs:multimsg(Msgs, tag, Complete),
-    {await, Await, State};
-handle_cast({multimsg, Msgs, Timeout}, State) ->
-    Await = gen_nbs:multimsg(Msgs, tag, Timeout),
-    {await, Await, State};
-handle_cast({msg_no_ack, Msg, To, Timeout}, State) ->
-    Await = gen_nbs:msg(To, Msg, tag, Timeout),
-    {await, Await, State};
-handle_cast({msg_no_await, Msg, To, Timeout}, State) ->
-    _Await = gen_nbs:msg(To, Msg, tag, Timeout),
-    {ok, State};
-handle_cast({msg_manual_ack, Msg, To}, State) ->
-    Await = gen_nbs:msg(To, {manual_ack, Msg}, tag),
-    {await, Await, State};
-handle_cast({msg_manual_fail, Msg, To}, State) ->
-    Await = gen_nbs:msg(To, {manual_fail, Msg}, tag),
-    {await, Await, State};
-handle_cast({msg_ack, Msg, To}, State) ->
-    Await = gen_nbs:msg(To, {ack, Msg}, tag),
-    {await, Await, State};
-handle_cast({msg_await_timeout, Msg, To, Timeout}, State) ->
-    Await = gen_nbs:msg(To, {ack, Msg}, tag),
-    {await, Await, State, Timeout};
-handle_cast({msg_long_ack, Msg, To, Timeout}, State) ->
-    Await = gen_nbs:msg(To, {long_ack, Timeout, Msg}, tag, Timeout),
-    {await, Await, State};
-handle_cast({msg_ack_timeout, Msg, To, Timeout}, State) ->
-    Await = gen_nbs:msg(To, {timeout, Timeout, Msg}, tag, Timeout),
-    {await, Await, State};
-handle_cast({fail, To}, State) ->
-    Await = gen_nbs:msg(To, {fail}, tag),
-    {await, Await, State};
-handle_cast({fail, To, Timeout}, State) ->
-    Await = gen_nbs:msg(To, {fail, Timeout}, tag),
-    {await, Await, State};
-handle_cast({multiple_awaits, Msg, To}, State) ->
-    Awaits = [gen_nbs:msg(To, {ack, Msg}, tag)],
-    {await, Awaits, State};
-handle_cast({msg_ack_complete, Msg, To, Complete}, State) ->
-    Await = gen_nbs:msg(To, {ack, Msg}, tag, Complete),
-    {await, Await, State};
 handle_cast(Msg, State={notify, Pid}) ->
     Pid ! {self(), {cast, Msg}},
     {ok, State}.
 
-handle_msg({fail}, F={From, _}, State={notify, Pid}) ->
-    Pid ! {self(), {fail, From}},
-    {fail, F, fail, State};
-handle_msg({fail, Timeout}, F={From, _}, State={notify, Pid}) ->
-    Pid ! {self(), {fail, From}},
-    {fail, F, fail, State, Timeout};
-handle_msg({long_ack, Timeout, Msg}, F={From, _}, State={notify, Pid}) ->
-    timer:sleep(Timeout),
-    Pid ! {self(), {msg, Msg, From}},
-    {ack, F, ok, State};
-handle_msg({timeout, Timeout, Msg}, F={From, _}, State={notify, Pid}) ->
-    Pid ! {self(), {msg, Msg, From}},
-    {ack, F, ok, State, Timeout};
-handle_msg({manual_ack, Msg}, F={From, _}, State={notify, Pid}) ->
-    Pid ! {self(), {msg, Msg, From}},
-    gen_nbs:ack(F, ok),
+handle_msg({fail, Reason}, F={From, _}, State={notify, Pid}) ->
+    Pid ! {self(), {fail, Reason, From}},
+    {fail, F, Reason, State};
+
+handle_msg({fail, Reason, Timeout}, F={From, _}, State={notify, Pid}) ->
+    Pid ! {self(), {fail, Reason, From}},
+    {fail, F, Reason, State, Timeout};
+
+handle_msg({no_ack, Msg}, {From, _}, State={notify, Pid}) ->
+    Pid ! {self(), {no_ack, Msg, From}},
     {ok, State};
-handle_msg({manual_fail, Msg}, F={From, _}, State={notify, Pid}) ->
-    Pid ! {self(), {msg, Msg, From}},
-    gen_nbs:fail(F, fail),
-    {ok, State};
+
 handle_msg({ack, Msg}, F={From, _}, State={notify, Pid}) ->
-    Pid ! {self(), {msg, Msg, From}},
-    {ack, F, ok, State};
-handle_msg(Msg, {From, _}, State={notify, Pid}) ->
-    Pid ! {self(), {msg, Msg, From}},
-    {ok, State};
-handle_msg({fail}, From, State) ->
-    {fail, From, fail, State};
-handle_msg({down}, _From, State) ->
-    {stop, down, State};
-handle_msg({ack, Res}, From, State) ->
-    {ack, From, Res, State}.
+    Pid ! {self(), {ack, Msg, From}},
+    {ack, F, Msg, State};
 
-handle_ack(Map, tag, State={notify, Pid}) when is_map(Map) ->
-    Pid ! {self(), Map},
+handle_msg({ack, Msg, Timeout}, F={From, _}, State={notify, Pid}) ->
+    Pid ! {self(), {ack, Msg, From}},
+    {ack, F, Msg, State, Timeout};
+
+handle_msg({long_ack, Msg, Timeout}, F={From, _}, State={notify, Pid}) ->
+    Pid ! {self(), {long_ack, Msg, From}},
+    timer:sleep(Timeout),
+    {ack, F, Msg, State};
+
+handle_msg({manual_fail, Reason}, F={From, _}, State={notify, Pid}) ->
+    Pid ! {self(), {manual_fail, Reason, From}},
+    gen_nbs:fail(F, Reason),
     {ok, State};
-handle_ack({ack, Ack}, tag, State={notify, Pid}) ->
+
+handle_msg({manual_ack, Msg}, F={From, _}, State={notify, Pid}) ->
+    Pid ! {self(), {manual_ack, Msg, From}},
+    gen_nbs:ack(F, Msg),
+    {ok, State}.
+
+handle_ack(Ack, _Tag, State={notify, Pid}) ->
     Pid ! {self(), Ack},
-    {ok, State};
-
-handle_ack({fail, _Reason}, tag, State={notify, Pid}) ->
-    Pid ! {self(), fail},
     {ok, State}.
 
 handle_info(Msg, State={notify, Pid}) ->

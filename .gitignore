@@ -18,3 +18,5 @@ _tdeps
 logs
 _build
 tags
+default.vim
+default.vim.lock

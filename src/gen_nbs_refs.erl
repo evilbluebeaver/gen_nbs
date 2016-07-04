@@ -11,53 +11,53 @@ new() ->
 
 complete(undefined, Data) ->
     Data;
-complete(CompleteFun, Data) ->
-    CompleteFun(Data).
+complete(CompletionFun, Data) ->
+    CompletionFun(Data).
 
 use(Result, Data, Ref, Refs) ->
-    case maps:find(Ref, Refs) of
+    case maps:take(Ref, Refs) of
         error ->
             {ok, Refs};
-        {ok, Ret} ->
-            use(Result, Data, Ref, Ret, Refs)
+        {Ret, Refs1} ->
+            use(Result, Data, Ref, Ret, Refs1)
     end.
 
 use(Result, Data, Ref,
     #ref_ret{tag=Tag,
-             master=MasterRef,
-             complete_fun=CompleteFun,
+             timer_ref=TimerRef,
+             parent_ref=ParentRef,
+             completion_fun=CompletionFun,
              children=undefined,
              results=undefined},
     Refs) ->
-    CompleteResult = complete(CompleteFun, {Result, Data}),
-    Refs1 = maps:remove(Ref, Refs),
-    use_master(CompleteResult, Ref, Tag, MasterRef, Refs1);
+    CompleteResult = complete(CompletionFun, {Result, Data}),
+    case ParentRef of
+        undefined ->
+            {ack, CompleteResult, Tag, TimerRef, Refs};
+        ParentRef ->
+            use_parent(CompleteResult, Ref, Tag, ParentRef, Refs)
+    end;
 
-use(fail, Reason, Ref,
+use(fail, Reason, _Ref,
     #ref_ret{tag=Tag,
-             master=undefined,
+             parent_ref=undefined,
+             timer_ref=TimerRef,
              children=Children,
              results=Results}, Refs) ->
-    Refs1 = maps:remove(Ref, Refs),
     Fun = fun(ChildRef, Acc) ->
                   fill_children_results(Reason, ChildRef, Acc)
           end,
-    {Results2, Refs2} = lists:foldl(Fun, {Results, Refs1}, sets:to_list(Children)),
-    {ack, Results2, Tag, Ref, Refs2};
-
-use(_Result, _Data, _Ref, _Ret, Refs) ->
-    {ok, Refs}.
+    {Results1, Refs1} = lists:foldl(Fun, {Results, Refs}, sets:to_list(Children)),
+    {ack, Results1, Tag, TimerRef, Refs1}.
 
 fill_children_results(Reason, Ref, {Results, Refs}) ->
-    case maps:get(Ref, Refs) of
-        #ref_ret{tag=Tag,
-                 children=undefined} ->
-            Refs1 = maps:remove(Ref, Refs),
+    case maps:take(Ref, Refs) of
+        {#ref_ret{tag=Tag,
+                 children=undefined}, Refs1} ->
             {maps:put(Tag, {fail, Reason}, Results), Refs1};
-        #ref_ret{tag=Tag,
+        {#ref_ret{tag=Tag,
                  children=Children,
-                 results=ChildrenResults} ->
-            Refs1 = maps:remove(Ref, Refs),
+                 results=ChildrenResults}, Refs1} ->
             Fun = fun(ChildRef, Acc) ->
                           fill_children_results(Reason, ChildRef, Acc)
                   end,
@@ -66,23 +66,24 @@ fill_children_results(Reason, Ref, {Results, Refs}) ->
             {maps:put(Tag, ChildrenResults2, Results), Refs2}
     end.
 
-use_master(ChildResult, ChildRef, ChildTag, Ref, Refs) ->
+use_parent(ChildResult, ChildRef, ChildTag, Ref, Refs) ->
     Ret=#ref_ret{tag=Tag,
-                 master=MasterRef,
+                 parent_ref=ParentRef,
+                 timer_ref=TimerRef,
                  children=Children,
                  results=Results,
-                 complete_fun=CompleteFun} = maps:get(Ref, Refs),
+                 completion_fun=CompletionFun} = maps:get(Ref, Refs),
     Children1 = sets:del_element(ChildRef, Children),
     Results1 = maps:put(ChildTag, ChildResult, Results),
     case sets:size(Children1) of
         0 ->
             Refs1 = maps:remove(Ref, Refs),
-            CompleteResult = complete(CompleteFun, Results1),
-            case MasterRef of
+            CompleteResult = complete(CompletionFun, Results1),
+            case ParentRef of
                 undefined ->
-                    {ack, Results1, Tag, Ref, Refs1};
-                MasterRef ->
-                    use_master(CompleteResult, Ref, Tag, MasterRef, Refs1)
+                    {ack, Results1, Tag, TimerRef, Refs1};
+                ParentRef ->
+                    use_parent(CompleteResult, Ref, Tag, ParentRef, Refs1)
             end;
         _ ->
             Ret1 = Ret#ref_ret{children=Children1,
@@ -92,27 +93,28 @@ use_master(ChildResult, ChildRef, ChildTag, Ref, Refs) ->
     end.
 
 reg(#await{tag=Tag,
-           msg=#msg{ref=MasterRef,
-                    complete_fun=CompleteFun,
+           timer_ref=TimerRef,
+           ref=#ref{ref=ParentRef,
+                    completion_fun=CompletionFun,
                     children=Children}}, OldRefs) ->
-    Acc = #{MasterRef => #ref_ret{tag=Tag,
-                                  complete_fun=CompleteFun,
+    Acc = #{ParentRef => #ref_ret{tag=Tag,
+                                  timer_ref=TimerRef,
+                                  completion_fun=CompletionFun,
                                   children=make_children(Children),
                                   results=make_results(Children)}},
-    FlatChildren = make_flat(MasterRef, Children, Acc),
+    FlatChildren = make_flat(ParentRef, Children, Acc),
     maps:merge(FlatChildren, OldRefs).
 
-
-make_flat(_Master, undefined, Result) ->
+make_flat(_Parent, undefined, Result) ->
     Result;
 
-make_flat(Master, Refs, Result) ->
-    Fun = fun(Tag, #msg{ref=Ref,
-                        complete_fun=CompleteFun,
+make_flat(Parent, Refs, Result) ->
+    Fun = fun(Tag, #ref{ref=Ref,
+                        completion_fun=CompletionFun,
                         children=Children}, Acc) ->
                   Acc1 = maps:put(Ref, #ref_ret{tag=Tag,
-                                                master=Master,
-                                                complete_fun=CompleteFun,
+                                                parent_ref=Parent,
+                                                completion_fun=CompletionFun,
                                                 children=make_children(Children),
                                                 results = make_results(Children)},
                           Acc),
@@ -129,7 +131,7 @@ make_results(_) ->
 make_children(undefined) ->
     undefined;
 make_children(Children) ->
-    Fun = fun(_Tag, #msg{ref=Ref}, Acc) ->
+    Fun = fun(_Tag, #ref{ref=Ref}, Acc) ->
                   sets:add_element(Ref, Acc)
           end,
     maps:fold(Fun, sets:new(), Children).

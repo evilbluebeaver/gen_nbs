@@ -22,9 +22,10 @@
 -export([start/3, start/4,
          start_link/3, start_link/4,
          abcast/2, abcast/3,
-         multimsg/2, multimsg/3,
          stop/1, stop/3,
-         cast/2, msg/3, msg/4,
+         msg/2, msg/3, package/1, package/2,
+         transmit/2, transmit/3, transmit/4,
+         cast/2,
          await/1,
          ack/2, fail/2,
          enter_loop/3, enter_loop/4, enter_loop/5, wake_hib/1]).
@@ -51,8 +52,8 @@
 -type dest() :: pid() | atom() | {atom(), atom()} | {global, atom()} | {via, atom(), term()}.
 -type options() :: [atom() | tuple()].
 -type from() :: {pid(), reference()}.
--type result_r() :: {ack, term()} | {fail, term()}.
--type result() :: result_r() | [result_r()].
+%-type result_r() :: {ack, term()} | {fail, term()}.
+%-type result() :: result_r() | [result_r()].
 -type callback_result() ::
 {fail, To :: from(), Reason :: term(), NewState :: term()} |
 {fail, To :: from(), Reason :: term(), NewState :: term(), timeout()} |
@@ -169,38 +170,60 @@ cast(Dest, Msg) ->
     do_send(Dest, ?CAST(Msg)).
 
 %% -----------------------------------------------------------------
-%% Post a message to a generic server.
+%% Create a message to a generic server.
 %% -----------------------------------------------------------------
 
--spec msg(Dest :: dest(), Msg :: term(), Tag :: term()) -> await().
-msg(Dest, Msg, Tag) ->
-    msg(Dest, Msg, Tag, undefined, ?DEFAULT_TIMEOUT).
--spec msg(Dest :: dest(), Msg :: term(), Tag :: term(),
-          fun((term()) -> term()) | timeout()) -> await().
+msg(Dest, Payload) ->
+    #msg{dest=Dest, payload=Payload}.
 
-msg(Dest, Msg, Tag, CompleteFun) when is_function(CompleteFun) ->
-    msg(Dest, Msg, Tag, CompleteFun, ?DEFAULT_TIMEOUT);
+msg(Dest, Payload, CompletionFun) when is_function(CompletionFun) ->
+    #msg{dest=Dest, payload=Payload, completion_fun=CompletionFun}.
 
-msg(Dest, Msg, Tag, Timeout) ->
-    msg(Dest, Msg, Tag, undefined, Timeout).
+package(Msgs) when is_map(Msgs) ->
+    #package{children=Msgs}.
 
--spec msg(Dest :: dest(), Msg :: term(), Tag :: term(),
-          CompleteFun :: fun((term()) -> term()), Timeout :: timeout()) -> await().
-msg(Dest, Msg, Tag, CompleteFun, Timeout) ->
-    SName = monitor_suitable_name(Dest),
-    Ref = monitor(process, SName),
-    TimerRef = case Timeout of
-                   infinity ->
-                       undefined;
-                   T ->
-                       erlang:send_after(T, self(), ?FAIL(Ref, timeout))
-               end,
+package(Msgs, CompletionFun) when is_map(Msgs), is_function(CompletionFun)->
+    #package{children=Msgs, completion_fun=CompletionFun}.
+
+%% -----------------------------------------------------------------
+%% Transmit created messages
+%% -----------------------------------------------------------------
+
+transmit(Msgs, Tag) ->
+    transmit(Msgs, Tag, undefined, ?DEFAULT_TIMEOUT).
+
+transmit(Msgs, Tag, CompletionFun) when is_function(CompletionFun) ->
+    transmit(Msgs, Tag, CompletionFun, ?DEFAULT_TIMEOUT);
+
+transmit(Msgs, Tag, Timeout) ->
+    transmit(Msgs, Tag, undefined, Timeout).
+
+transmit(Msg, Tag, _CompletionFun, Timeout) ->
+    Ref = do_transmit(Msg),
+    TimerRef = erlang:send_after(Timeout, self(), ?FAIL(Ref#ref.ref, timeout)),
+    #await{tag=Tag,
+           ref=Ref,
+           timer_ref=TimerRef}.
+
+do_transmit(_, Msg) ->
+    do_transmit(Msg).
+
+do_transmit(Msgs) when is_map(Msgs) ->
+    do_transmit(#package{children=Msgs});
+
+do_transmit(#package{children=Children,
+                     completion_fun=CompletionFun}) ->
+    #ref{ref=make_ref(),
+         completion_fun=CompletionFun,
+         children=maps:map(fun do_transmit/2, Children)};
+
+do_transmit(#msg{dest=Dest, payload=Payload,
+                 completion_fun=CompletionFun}) ->
+    Name = monitor_suitable_name(Dest),
+    Ref = monitor(process, Name),
     From = ?FROM(self(), Ref),
-    do_send(Dest, ?MSG(From, Msg)).
-    %#await{master_ref=Ref,
-           %tag=Tag,
-           %complete_fun=CompleteFun,
-           %timer_ref=TimerRef}.
+    do_send(Name, ?MSG(From, Payload)),
+    #ref{ref=Ref, completion_fun=CompletionFun}.
 
 %% -----------------------------------------------------------------
 %% Manual ack/fail
@@ -230,35 +253,37 @@ fail(?FROM(From, Ref), Reason) ->
                   ok
         end).
 
--spec await(Fun :: fun((term()) -> #await{})) -> result().
-await(Fun) ->
+await(Msg) ->
+    await(Msg, ?DEFAULT_TIMEOUT).
+
+await(Msg, Timeout) ->
     Self = self(),
     spawn(fun() ->
                   Tag = make_ref(),
-                  Await = Fun(Tag),
                   Refs = gen_nbs_refs:new(),
+                  Await = gen_nbs:transmit(Msg, Tag, Timeout),
                   Refs1 = gen_nbs_refs:reg(Await, Refs),
-                  RefsKeys = gen_nbs_refs:refs(Refs1),
-                  Ack = do_receive(Tag, RefsKeys, Refs1),
-                  Self ! Ack
+                  Ack = do_receive(Tag, Refs1),
+                  Self ! {return, Ack}
           end),
     receive
-        Ack -> Ack
+        {return, Ack} ->
+            Ack
     end.
 
-do_receive(Tag, [Ref | T], Refs) ->
-    {Result, Msg} = receive
-                        {'DOWN', Ref, process, _Pid, _Info} ->
-                            {fail, down};
-                        ?ACK(Ref, R, M) ->
-                            {R, M}
+do_receive(Tag, Refs) ->
+    {Ref, Result, Msg} = receive
+                        {'DOWN', R, process, _Pid, _Info} ->
+                            {R, fail, down};
+                        ?ACK(R, Res, M) ->
+                            {R, Res, M}
                     end,
     true = demonitor(Ref),
     case gen_nbs_refs:use(Result, Msg, Ref, Refs) of
         {ok, Refs1} ->
-            do_receive(Tag, T, Refs1);
+            do_receive(Tag, Refs1);
         {ack, Ack, Tag, TimerRef, _Refs1} ->
-            cancel_timer(TimerRef),
+            erlang:cancel_timer(TimerRef),
             Ack
     end.
 
@@ -274,35 +299,6 @@ abcast(Nodes, Name, Msg) when is_list(Nodes), is_atom(Name) ->
     Fun = fun(Node) -> do_send({Name, Node}, ?CAST(Msg)) end,
     ok = lists:foreach(Fun, Nodes),
     abcast.
-
-multimsg(Msgs, Tag) when is_map(Msgs)->
-    multimsg(Msgs, Tag, undefined, ?DEFAULT_TIMEOUT).
-
-multimsg(Msgs, Tag, CompleteFun) when is_map(Msgs), is_function(CompleteFun) ->
-    multimsg(Msgs, Tag, CompleteFun, ?DEFAULT_TIMEOUT);
-multimsg(Msgs, Tag, Timeout) when is_map(Msgs) ->
-    multimsg(Msgs, Tag, undefined, Timeout).
-
-multimsg(Msgs, Tag, CompleteFun, Timeout) when is_map(Msgs) ->
-    MasterRef = make_ref(),
-    ChildRefs = maps:fold(fun(ChildTag, {Dest, Msg}, Acc) ->
-                                  SName = monitor_suitable_name(Dest),
-                                  Ref = monitor(process, SName),
-                                  From = ?FROM(self(), Ref),
-                                  do_send(Dest, ?MSG(From, Msg)),
-                                  maps:put(Ref, ChildTag, Acc)
-                          end, #{}, Msgs),
-    TimerRef = case Timeout of
-                   infinity ->
-                       undefined;
-                   T ->
-                       erlang:send_after(T, self(), ?FAIL(MasterRef, timeout))
-               end.
-    %#await{master_ref=MasterRef,
-           %timer_ref=TimerRef,
-           %tag=Tag,
-           %complete_fun=CompleteFun,
-           %child_refs=ChildRefs}.
 
 %% -----------------------------------------------------------------
 %% Send functions
@@ -504,14 +500,6 @@ decode_msg(Msg, InnerState=#inner_state{parent=Parent,
 %% report.
 %% ---------------------------------------------------
 
-cancel_timer(TimerRef) ->
-    case TimerRef of
-        undefined ->
-            ok;
-        _ ->
-            erlang:cancel_timer(TimerRef)
-    end.
-
 try_dispatch({'DOWN', Ref, process, _Pid, _Info}, Mod, State, Refs) ->
     try_dispatch(?FAIL(Ref, down), Mod, State, Refs);
 try_dispatch(?CAST(Msg), Mod, State, Refs) ->
@@ -524,7 +512,7 @@ try_dispatch(?ACK(Ref, Result, Reason), Mod, State, Refs) ->
         {ok, Refs1} ->
             {ok, Refs1};
         {ack, Ack, Tag, TimerRef, Refs1} ->
-            cancel_timer(TimerRef),
+            erlang:cancel_timer(TimerRef),
             try_handle(Mod, handle_ack, [Ack, Tag, State], Refs1)
     end;
 

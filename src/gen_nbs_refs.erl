@@ -78,12 +78,12 @@ use_parent(ChildResult, ChildRef, ChildTag, Ref, Refs) ->
     case sets:size(Children1) of
         0 ->
             Refs1 = maps:remove(Ref, Refs),
-            CompleteResult = complete(CompletionFun, Results1),
+            CompleteResults = complete(CompletionFun, Results1),
             case ParentRef of
                 undefined ->
-                    {ack, Results1, Tag, TimerRef, Refs1};
+                    {ack, CompleteResults, Tag, TimerRef, Refs1};
                 ParentRef ->
-                    use_parent(CompleteResult, Ref, Tag, ParentRef, Refs1)
+                    use_parent(CompleteResults, Ref, Tag, ParentRef, Refs1)
             end;
         _ ->
             Ret1 = Ret#ref_ret{children=Children1,

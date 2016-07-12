@@ -609,6 +609,16 @@ test_transmit(_Config) ->
     ?WAIT_FOR_MSG({Pid2, {ack, msg, Pid1}}),
     timer:sleep(?TIMEOUT),
     ?WAIT_FOR_MSG({Pid1, {ok, {ack, msg}}}),
+
+    %%
+    %% Ack (msg completion fun)
+    %%
+    InvalidCompletionFun = fun(_) -> error(unknown) end,
+    gen_nbs:cast(Pid1, {transmit, gen_nbs:msg(Pid2, {ack, msg}, InvalidCompletionFun)}),
+    ?WAIT_FOR_MSG({Pid2, {ack, msg, Pid1}}),
+    timer:sleep(?TIMEOUT),
+    ?WAIT_FOR_MSG({Pid1, {error, unknown}}),
+
     gen_nbs:stop(Pid1),
     gen_nbs:stop(Pid2),
     gen_nbs:stop(Pid3),
@@ -644,6 +654,18 @@ test_await(_Config) ->
     Package4 = gen_nbs:package(#{tag1 => gen_nbs:msg(Pid1, {ack, msg1})},
                                CompletionFun),
     {ack, msg1} = gen_nbs:await(Package4),
+    ?WAIT_FOR_MSG({Pid1, {ack, msg1, _}}),
+
+    Package5 = gen_nbs:package(#{tag1 => gen_nbs:msg(Pid1, {manual_ack, msg1}),
+                                 tag2 => gen_nbs:msg(Pid2, {manual_ack, msg2})}),
+    #{tag1 := {ack, msg1},
+      tag2 := {ack, msg2}} = gen_nbs:await(Package5),
+    ?WAIT_FOR_MSG({Pid1, {manual_ack, msg1, _}}),
+    ?WAIT_FOR_MSG({Pid2, {manual_ack, msg2, _}}),
+
+    CompletionFun1 = fun(_) ->  error(unknown) end,
+    Msg6 = gen_nbs:msg(Pid1, {ack, msg1}, CompletionFun1),
+    {error, unknown} = gen_nbs:await(Msg6),
     ?WAIT_FOR_MSG({Pid1, {ack, msg1, _}}),
     gen_nbs:stop(Pid1),
     gen_nbs:stop(Pid2),

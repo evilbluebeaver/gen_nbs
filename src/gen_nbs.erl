@@ -26,7 +26,7 @@
          msg/2, msg/3, package/1, package/2,
          transmit/2, transmit/3,
          cast/2,
-         await/1,
+         await/1, await/2,
          ack/2, fail/2,
          enter_loop/3, enter_loop/4, enter_loop/5, wake_hib/1]).
 

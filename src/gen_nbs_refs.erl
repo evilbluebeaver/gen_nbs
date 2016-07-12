@@ -12,7 +12,12 @@ new() ->
 complete(undefined, Data) ->
     Data;
 complete(CompletionFun, Data) ->
-    CompletionFun(Data).
+    try
+        CompletionFun(Data)
+    catch
+        Kind:Reason ->
+            {Kind, Reason}
+    end.
 
 use(Result, Data, Ref, Refs) ->
     case maps:take(Ref, Refs) of
@@ -23,20 +28,10 @@ use(Result, Data, Ref, Refs) ->
     end.
 
 use(Result, Data, Ref,
-    #ref_ret{tag=Tag,
-             timer_ref=TimerRef,
-             parent_ref=ParentRef,
-             completion_fun=CompletionFun,
-             children=undefined,
+    Ret=#ref_ret{children=undefined,
              results=undefined},
     Refs) ->
-    CompleteResult = complete(CompletionFun, {Result, Data}),
-    case ParentRef of
-        undefined ->
-            {ack, CompleteResult, Tag, TimerRef, Refs};
-        ParentRef ->
-            use_parent(CompleteResult, Ref, Tag, ParentRef, Refs)
-    end;
+    use_result({Result, Data}, Ref, Ret, Refs);
 
 use(fail, Reason, _Ref,
     #ref_ret{tag=Tag,
@@ -49,6 +44,18 @@ use(fail, Reason, _Ref,
           end,
     {Results1, Refs1} = lists:foldl(Fun, {Results, Refs}, sets:to_list(Children)),
     {ack, Results1, Tag, TimerRef, Refs1}.
+
+use_result(Results, Ref, #ref_ret{tag=Tag,
+                                  timer_ref=TimerRef,
+                                  parent_ref=ParentRef,
+                                  completion_fun=CompletionFun}, Refs) ->
+    CompleteResult = complete(CompletionFun, Results),
+    case ParentRef of
+        undefined ->
+            {ack, CompleteResult, Tag, TimerRef, Refs};
+        ParentRef ->
+            use_parent(CompleteResult, Ref, Tag, ParentRef, Refs)
+    end.
 
 fill_children_results(Reason, Ref, {Results, Refs}) ->
     case maps:take(Ref, Refs) of
@@ -67,24 +74,14 @@ fill_children_results(Reason, Ref, {Results, Refs}) ->
     end.
 
 use_parent(ChildResult, ChildRef, ChildTag, Ref, Refs) ->
-    Ret=#ref_ret{tag=Tag,
-                 parent_ref=ParentRef,
-                 timer_ref=TimerRef,
-                 children=Children,
-                 results=Results,
-                 completion_fun=CompletionFun} = maps:get(Ref, Refs),
+    Ret=#ref_ret{children=Children,
+                 results=Results} = maps:get(Ref, Refs),
     Children1 = sets:del_element(ChildRef, Children),
     Results1 = maps:put(ChildTag, ChildResult, Results),
     case sets:size(Children1) of
         0 ->
             Refs1 = maps:remove(Ref, Refs),
-            CompleteResults = complete(CompletionFun, Results1),
-            case ParentRef of
-                undefined ->
-                    {ack, CompleteResults, Tag, TimerRef, Refs1};
-                ParentRef ->
-                    use_parent(CompleteResults, Ref, Tag, ParentRef, Refs1)
-            end;
+            use_result(Results1, Ref, Ret, Refs1);
         _ ->
             Ret1 = Ret#ref_ret{children=Children1,
                                results=Results1},

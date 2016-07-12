@@ -253,17 +253,12 @@ await(Msg) ->
 await(Msg, Timeout) ->
     Self = self(),
     spawn(fun() ->
-                  try
-                      Tag = make_ref(),
-                      Refs = gen_nbs_refs:new(),
-                      Await = gen_nbs:transmit(Msg, Tag, Timeout),
-                      Refs1 = gen_nbs_refs:reg(Await, Refs),
-                      Ack = do_receive(Tag, Refs1),
-                      Self ! {return, Ack}
-                  catch
-                      _: Reason ->
-                          Self ! {return, {fail, Reason}}
-                  end
+                  Tag = make_ref(),
+                  Refs = gen_nbs_refs:new(),
+                  Await = gen_nbs:transmit(Msg, Tag, Timeout),
+                  Refs1 = gen_nbs_refs:reg(Await, Refs),
+                  Ack = do_receive(Tag, Refs1),
+                  Self ! {return, Ack}
           end),
     receive
         {return, Ack} ->

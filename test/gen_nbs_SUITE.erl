@@ -613,11 +613,11 @@ test_transmit(_Config) ->
     %%
     %% Ack (msg completion fun)
     %%
-    InvalidCompletionFun = fun(_) -> error(unkown) end,
+    InvalidCompletionFun = fun(_) -> error(unknown) end,
     gen_nbs:cast(Pid1, {transmit, gen_nbs:msg(Pid2, {ack, msg}, InvalidCompletionFun)}),
     ?WAIT_FOR_MSG({Pid2, {ack, msg, Pid1}}),
     timer:sleep(?TIMEOUT),
-    ?WAIT_FOR_MSG({Pid1, {ok, {ack, msg}}}),
+    ?WAIT_FOR_MSG({Pid1, {error, unknown}}),
 
     gen_nbs:stop(Pid1),
     gen_nbs:stop(Pid2),
@@ -665,7 +665,7 @@ test_await(_Config) ->
 
     CompletionFun1 = fun(_) ->  error(unknown) end,
     Msg6 = gen_nbs:msg(Pid1, {ack, msg1}, CompletionFun1),
-    {fail, unknown} = gen_nbs:await(Msg6),
+    {error, unknown} = gen_nbs:await(Msg6),
     ?WAIT_FOR_MSG({Pid1, {ack, msg1, _}}),
     gen_nbs:stop(Pid1),
     gen_nbs:stop(Pid2),

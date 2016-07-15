@@ -397,6 +397,7 @@ test_msg(_Config) ->
     Expected2= #msg{dest=test_dest,
                     payload=test_payload},
     Expected2 = gen_nbs:msg(test_dest, test_payload),
+    Expected2 = gen_nbs:msg(test_dest, test_payload, undefined),
     ok.
 
 test_package(_Config) ->
@@ -409,6 +410,7 @@ test_package(_Config) ->
     Expected1 = gen_nbs:package(Msgs, CompletionFun),
     Expected2 = #package{children=Msgs},
     Expected2 = gen_nbs:package(Msgs),
+    Expected2 = gen_nbs:package(Msgs, undefined),
     ok.
 
 test_send(_Config) ->

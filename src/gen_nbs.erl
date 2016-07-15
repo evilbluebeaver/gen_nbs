@@ -176,11 +176,17 @@ cast(Dest, Msg) ->
 msg(Dest, Payload) ->
     #msg{dest=Dest, payload=Payload}.
 
+msg(Dest, Payload, CompletionFun) when CompletionFun == undefined ->
+    #msg{dest=Dest, payload=Payload, completion_fun=CompletionFun};
+
 msg(Dest, Payload, CompletionFun) when is_function(CompletionFun) ->
     #msg{dest=Dest, payload=Payload, completion_fun=CompletionFun}.
 
 package(Msgs) when is_map(Msgs) ->
     #package{children=Msgs}.
+
+package(Msgs, CompletionFun) when is_map(Msgs), CompletionFun == undefined->
+    #package{children=Msgs, completion_fun=CompletionFun};
 
 package(Msgs, CompletionFun) when is_map(Msgs), is_function(CompletionFun)->
     #package{children=Msgs, completion_fun=CompletionFun}.

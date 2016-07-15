@@ -89,6 +89,12 @@ use_parent(ChildResult, ChildRef, ChildTag, Ref, Refs) ->
             {ok, Refs1}
     end.
 
+reg(Awaits, OldRefs) when is_list(Awaits) ->
+    Fun = fun(Await, Acc) ->
+                  reg(Await, Acc)
+          end,
+    lists:foldl(Fun, OldRefs, Awaits);
+
 reg(#await{tag=Tag,
            timer_ref=TimerRef,
            ref=#ref{ref=ParentRef,

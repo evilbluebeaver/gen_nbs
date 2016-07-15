@@ -13,6 +13,7 @@
 %% Test cases
 -export([test_reg_1/1,
          test_reg_2/1,
+         test_reg_3/1,
          test_use_1/1,
          test_use_2/1,
          test_fail/1]).
@@ -49,7 +50,7 @@ end_per_testcase(_TestCase, _Config) ->
     ok.
 
 groups() ->
-    [{reg, [test_reg_1, test_reg_2]},
+    [{reg, [test_reg_1, test_reg_2, test_reg_3]},
      {use, [test_use_1, test_use_2]},
      {fail, [test_fail]}].
 
@@ -103,6 +104,23 @@ test_reg_2(_Config) ->
                     ref=#ref{ref=ref1}},
     Result = gen_nbs_refs:reg(Await, gen_nbs_refs:new()),
     Expected = #{ref1 => #ref_ret{tag=master_tag,
+                                   parent_ref=undefined,
+                                   children=undefined,
+                                   results=undefined}},
+    Expected = Result,
+    ok.
+
+test_reg_3(_Config) ->
+    Await1 = #await{tag=master_tag1,
+                    ref=#ref{ref=ref1}},
+    Await2 = #await{tag=master_tag2,
+                    ref=#ref{ref=ref2}},
+    Result = gen_nbs_refs:reg([Await1, Await2], gen_nbs_refs:new()),
+    Expected = #{ref1 => #ref_ret{tag=master_tag1,
+                                   parent_ref=undefined,
+                                   children=undefined,
+                                   results=undefined},
+                ref2 => #ref_ret{tag=master_tag2,
                                    parent_ref=undefined,
                                    children=undefined,
                                    results=undefined}},

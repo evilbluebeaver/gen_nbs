@@ -14,9 +14,12 @@
 -export([test_reg_1/1,
          test_reg_2/1,
          test_reg_3/1,
+         test_reg_completed_1/1,
+         test_reg_completed_2/1,
          test_use_1/1,
          test_use_2/1,
-         test_fail/1]).
+         test_fail/1,
+         test_completion_fun_error/1]).
 
 %%--------------------------------------------------------------------
 %% COMMON TEST CALLBACK FUNCTIONS
@@ -51,13 +54,13 @@ end_per_testcase(_TestCase, _Config) ->
 
 groups() ->
     [{reg, [test_reg_1, test_reg_2, test_reg_3]},
-     {use, [test_use_1, test_use_2]},
-     {fail, [test_fail]}].
+     {reg_completed, [test_reg_completed_1, test_reg_completed_2]},
+     {use, [test_use_1, test_use_2, test_fail, test_completion_fun_error]}].
 
 all() ->
     [{group, reg},
-     {group, use},
-     {group, fail}].
+     {group, reg_completed},
+     {group, use}].
 
 %%--------------------------------------------------------------------
 %% TEST CASES
@@ -68,46 +71,48 @@ test_reg_1(Config) ->
     Await = #await{tag=master_tag,
                    ref=#ref{ref=master_ref,
                             children=Children}},
-    Result = gen_nbs_refs:reg(Await, gen_nbs_refs:new()),
-    Expected = #{master_ref => #ref_ret{tag=master_tag,
-                                        children=sets:from_list([ref1, ref2]),
-                                        results=#{}},
-                 ref1 => #ref_ret{tag=tag1,
-                                  parent_ref=master_ref,
-                                  children=sets:from_list([ref3, ref4]),
-                                  results=#{}},
-                 ref2 => #ref_ret{tag=tag2,
-                                  parent_ref=master_ref,
-                                  children=undefined,
-                                  results=undefined},
-                 ref3 => #ref_ret{tag=tag3,
-                                  parent_ref=ref1,
-                                  children=undefined,
-                                  results=undefined},
-                 ref4 => #ref_ret{tag=tag4,
-                                  parent_ref=ref1,
-                                  children=sets:from_list([ref5, ref6]),
-                                  results=#{}},
-                 ref5 => #ref_ret{tag=tag5,
-                                  parent_ref=ref4,
-                                  children=undefined,
-                                  results=undefined},
-                 ref6 => #ref_ret{tag=tag6,
-                                  parent_ref=ref4,
-                                  children=undefined,
-                                  results=undefined}},
-    Expected = Result,
+    ExpectedRefs = #{master_ref => #ref_ret{tag=master_tag,
+                                            children=sets:from_list([ref1, ref2]),
+                                            results=#{}},
+                     ref1 => #ref_ret{tag=tag1,
+                                      parent_ref=master_ref,
+                                      children=sets:from_list([ref3, ref4]),
+                                      results=#{}},
+                     ref2 => #ref_ret{tag=tag2,
+                                      parent_ref=master_ref,
+                                      children=undefined,
+                                      results=undefined},
+                     ref3 => #ref_ret{tag=tag3,
+                                      parent_ref=ref1,
+                                      children=undefined,
+                                      results=undefined},
+                     ref4 => #ref_ret{tag=tag4,
+                                      parent_ref=ref1,
+                                      children=sets:from_list([ref5, ref6]),
+                                      results=#{}},
+                     ref5 => #ref_ret{tag=tag5,
+                                      parent_ref=ref4,
+                                      children=undefined,
+                                      results=undefined},
+                     ref6 => #ref_ret{tag=tag6,
+                                      parent_ref=ref4,
+                                      children=undefined,
+                                      results=undefined}},
+    ExpectedCompleted = [],
+    Expected = {ExpectedRefs, ExpectedCompleted},
+    Expected = gen_nbs_refs:reg(Await, gen_nbs_refs:new()),
     ok.
 
 test_reg_2(_Config) ->
     Await = #await{tag=master_tag,
-                    ref=#ref{ref=ref1}},
-    Result = gen_nbs_refs:reg(Await, gen_nbs_refs:new()),
-    Expected = #{ref1 => #ref_ret{tag=master_tag,
-                                   parent_ref=undefined,
-                                   children=undefined,
-                                   results=undefined}},
-    Expected = Result,
+                   ref=#ref{ref=ref1}},
+    ExpectedRefs = #{ref1 => #ref_ret{tag=master_tag,
+                                      parent_ref=undefined,
+                                      children=undefined,
+                                      results=undefined}},
+    ExpectedCompleted = [],
+    Expected = {ExpectedRefs, ExpectedCompleted},
+    Expected = gen_nbs_refs:reg(Await, gen_nbs_refs:new()),
     ok.
 
 test_reg_3(_Config) ->
@@ -115,16 +120,48 @@ test_reg_3(_Config) ->
                     ref=#ref{ref=ref1}},
     Await2 = #await{tag=master_tag2,
                     ref=#ref{ref=ref2}},
-    Result = gen_nbs_refs:reg([Await1, Await2], gen_nbs_refs:new()),
-    Expected = #{ref1 => #ref_ret{tag=master_tag1,
-                                   parent_ref=undefined,
-                                   children=undefined,
-                                   results=undefined},
-                ref2 => #ref_ret{tag=master_tag2,
-                                   parent_ref=undefined,
-                                   children=undefined,
-                                   results=undefined}},
-    Expected = Result,
+    ExpectedRefs = #{ref1 => #ref_ret{tag=master_tag1,
+                                      parent_ref=undefined,
+                                      children=undefined,
+                                      results=undefined},
+                     ref2 => #ref_ret{tag=master_tag2,
+                                      parent_ref=undefined,
+                                      children=undefined,
+                                      results=undefined}},
+    ExpectedCompleted = [],
+    Expected = {ExpectedRefs, ExpectedCompleted},
+    Expected = gen_nbs_refs:reg([Await1, Await2], gen_nbs_refs:new()),
+    ok.
+
+test_reg_completed_1(_Config) ->
+    Await = #await{tag=master_tag,
+                   ref=#ref{ref=master_ref,
+                            children=#{}}},
+    ExpectedRefs = #{master_ref => #ref_ret{tag=master_tag,
+                                            parent_ref=undefined,
+                                            children=undefined,
+                                            results=undefined}},
+    ExpectedCompleted = [master_ref],
+    Expected = {ExpectedRefs, ExpectedCompleted},
+    Expected = gen_nbs_refs:reg(Await, gen_nbs_refs:new()),
+    ok.
+
+test_reg_completed_2(_Config) ->
+    Await1 = #await{tag=master_tag1,
+                    ref=#ref{ref=ref1, children=#{}}},
+    Await2 = #await{tag=master_tag2,
+                    ref=#ref{ref=ref2}},
+    ExpectedRefs = #{ref1 => #ref_ret{tag=master_tag1,
+                                      parent_ref=undefined,
+                                      children=undefined,
+                                      results=undefined},
+                     ref2 => #ref_ret{tag=master_tag2,
+                                      parent_ref=undefined,
+                                      children=undefined,
+                                      results=undefined}},
+    ExpectedCompleted = [ref1],
+    Expected = {ExpectedRefs, ExpectedCompleted},
+    Expected = gen_nbs_refs:reg([Await1, Await2], gen_nbs_refs:new()),
     ok.
 
 test_use_1(Config) ->
@@ -135,26 +172,24 @@ test_use_1(Config) ->
                    ref=#ref{ref=master_ref,
                             completion_fun=CompletionFun,
                             children=Children}},
-    Refs = gen_nbs_refs:reg(Await, gen_nbs_refs:new()),
+    {Refs, []} = gen_nbs_refs:reg(Await, gen_nbs_refs:new()),
     {ok, Refs} = gen_nbs_refs:use(ack, ok, unknown_ref, Refs),
     {ok, Refs1} = gen_nbs_refs:use(ack, ok, ref6, Refs),
     {ok, Refs2} = gen_nbs_refs:use(ack, ok, ref5, Refs1),
     {ok, Refs3} = gen_nbs_refs:use(ack, ok, ref3, Refs2),
-    Result = gen_nbs_refs:use(ack, ok, ref2, Refs3),
     Expected = {ack, #{tag2=> {ack, ok},
                        tag1 => #{tag3 => {ack,ok},
                                  tag4 => #{tag5 => {ack,ok},tag6 => {ack,ok}}}},
                 master_tag, timer_ref, #{}},
-    Result = Expected,
+    Expected = gen_nbs_refs:use(ack, ok, ref2, Refs3),
     ok.
 
 test_use_2(_Config) ->
     Await = #await{tag=master_tag,
-                    ref=#ref{ref=ref1}},
-    Refs = gen_nbs_refs:reg(Await, gen_nbs_refs:new()),
-    Result = gen_nbs_refs:use(ack, ok, ref1, Refs),
+                   ref=#ref{ref=ref1}},
+    {Refs, []} = gen_nbs_refs:reg(Await, gen_nbs_refs:new()),
     Expected = {ack, {ack, ok}, master_tag, undefined, #{}},
-    Expected = Result,
+    Expected = gen_nbs_refs:use(ack, ok, ref1, Refs),
     ok.
 
 test_fail(Config) ->
@@ -165,21 +200,29 @@ test_fail(Config) ->
                    ref=#ref{ref=master_ref,
                             completion_fun=CompletionFun,
                             children=Children}},
-    Refs = gen_nbs_refs:reg(Await, gen_nbs_refs:new()),
-    Result1 = gen_nbs_refs:use(fail, timeout, master_ref, Refs),
+    {Refs, []} = gen_nbs_refs:reg(Await, gen_nbs_refs:new()),
     Expected1 = {ack,#{tag1 =>
                        #{tag3 => {fail,timeout},
                          tag4 => #{tag5 => {fail,timeout},tag6 => {fail,timeout}}},
                        tag2 => {fail,timeout}},
                  master_tag, timer_ref, #{}},
-    Result1 = Expected1,
+    Expected1 = gen_nbs_refs:use(fail, timeout, master_ref, Refs),
 
     {ok, Refs1} = gen_nbs_refs:use(ack, ok, ref5, Refs),
-    Result2 = gen_nbs_refs:use(fail, timeout, master_ref, Refs1),
     Expected2 = {ack,#{tag1 =>
                        #{tag3 => {fail,timeout},
                          tag4 => #{tag5 => {ack,ok},tag6 => {fail,timeout}}},
                        tag2 => {fail, timeout}},
                  master_tag, timer_ref, #{}},
-    Result2 = Expected2,
+    Expected2 = gen_nbs_refs:use(fail, timeout, master_ref, Refs1),
+    ok.
+
+test_completion_fun_error(_Config) ->
+    CompletionFun = fun(_) -> error(some_error) end,
+    Await = #await{tag=master_tag,
+                   ref=#ref{ref=ref1,
+                            completion_fun=CompletionFun}},
+    {Refs, []} = gen_nbs_refs:reg(Await, gen_nbs_refs:new()),
+    Expected = {ack, {fail, some_error}, master_tag, undefined, #{}},
+    Expected = gen_nbs_refs:use(ack, ok, ref1, Refs),
     ok.

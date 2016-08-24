@@ -10,13 +10,13 @@ new() ->
     #{}.
 
 complete(undefined, Data) ->
-    Data;
+    {ok, Data};
 complete(CompletionFun, Data) ->
     try
-        CompletionFun(Data)
+        {ok, CompletionFun(Data)}
     catch
-        Kind:Reason ->
-            {Kind, Reason}
+        _Kind:Reason ->
+            {fail, Reason}
     end.
 
 use(Result, Data, Ref, Refs) ->
@@ -28,9 +28,7 @@ use(Result, Data, Ref, Refs) ->
     end.
 
 use(Result, Data, Ref,
-    Ret=#ref_ret{children=undefined,
-             results=undefined},
-    Refs) ->
+    Ret=#ref_ret{children=undefined, results=undefined}, Refs) ->
     use_result({Result, Data}, Ref, Ret, Refs);
 
 use(fail, Reason, _Ref,
@@ -49,7 +47,12 @@ use_result(Results, Ref, #ref_ret{tag=Tag,
                                   timer_ref=TimerRef,
                                   parent_ref=ParentRef,
                                   completion_fun=CompletionFun}, Refs) ->
-    CompleteResult = complete(CompletionFun, Results),
+    CompleteResult = case complete(CompletionFun, Results) of
+                         {ok, C} ->
+                             C;
+                         {fail, Reason} ->
+                             {fail, Reason}
+                     end,
     case ParentRef of
         undefined ->
             {ack, CompleteResult, Tag, TimerRef, Refs};
@@ -60,7 +63,7 @@ use_result(Results, Ref, #ref_ret{tag=Tag,
 fill_children_results(Reason, Ref, {Results, Refs}) ->
     case maps:take(Ref, Refs) of
         {#ref_ret{tag=Tag,
-                 children=undefined}, Refs1} ->
+                 children=undefined, results=undefined}, Refs1} ->
             {maps:put(Tag, {fail, Reason}, Results), Refs1};
         {#ref_ret{tag=Tag,
                  children=Children,
@@ -89,53 +92,64 @@ use_parent(ChildResult, ChildRef, ChildTag, Ref, Refs) ->
             {ok, Refs1}
     end.
 
-reg(Awaits, OldRefs) when is_list(Awaits) ->
-    Fun = fun(Await, Acc) ->
-                  reg(Await, Acc)
-          end,
-    lists:foldl(Fun, OldRefs, Awaits);
-
-reg(#await{tag=Tag,
-           timer_ref=TimerRef,
-           ref=#ref{ref=ParentRef,
-                    completion_fun=CompletionFun,
-                    children=Children}}, OldRefs) ->
-    Acc = #{ParentRef => #ref_ret{tag=Tag,
-                                  timer_ref=TimerRef,
-                                  completion_fun=CompletionFun,
-                                  children=make_children(Children),
-                                  results=make_results(Children)}},
-    FlatChildren = make_flat(ParentRef, Children, Acc),
-    maps:merge(FlatChildren, OldRefs).
-
-make_flat(_Parent, undefined, Result) ->
-    Result;
-
-make_flat(Parent, Refs, Result) ->
-    Fun = fun(Tag, #ref{ref=Ref,
-                        completion_fun=CompletionFun,
-                        children=Children}, Acc) ->
-                  Acc1 = maps:put(Ref, #ref_ret{tag=Tag,
-                                                parent_ref=Parent,
-                                                completion_fun=CompletionFun,
-                                                children=make_children(Children),
-                                                results = make_results(Children)},
-                          Acc),
-                  make_flat(Ref, Children, Acc1)
-          end,
-    maps:fold(Fun, Result, Refs).
-
-
-make_results(undefined) ->
+results_map(undefined) ->
     undefined;
-make_results(_) ->
+results_map(Children) when map_size(Children) == 0 ->
+    undefined;
+results_map(_) ->
     #{}.
 
-make_children(undefined) ->
+children_set(undefined) ->
     undefined;
-make_children(Children) ->
+children_set(Children) when map_size(Children) == 0 ->
+    undefined;
+children_set(Children) ->
     Fun = fun(_Tag, #ref{ref=Ref}, Acc) ->
                   sets:add_element(Ref, Acc)
           end,
     maps:fold(Fun, sets:new(), Children).
 
+reg(Awaits, Refs) when is_list(Awaits) ->
+    Fun = fun(Ref, {RefsAcc, CompletedAcc}) ->
+                  {RefsAcc1, Completed} = reg(Ref, RefsAcc),
+                  CompletedAcc1 = CompletedAcc ++ Completed,
+                  {RefsAcc1, CompletedAcc1}
+          end,
+    lists:foldl(Fun, {Refs, []}, Awaits);
+
+reg(#await{tag=Tag,
+           timer_ref=TimerRef,
+           ref=#ref{ref=Ref,
+                        completion_fun=CompletionFun,
+                        children=Children}}, Refs) ->
+    RefRet = #ref_ret{tag=Tag,
+                      timer_ref=TimerRef,
+                      completion_fun=CompletionFun,
+                      children=children_set(Children),
+                      results=results_map(Children)},
+    RefsAcc = maps:put(Ref, RefRet, Refs),
+    CompletedRefsAcc = [],
+    reg_children(Ref, Children, RefsAcc, CompletedRefsAcc).
+
+reg_children(_Ref, undefined, RefsAcc, CompletedRefsAcc) ->
+    {RefsAcc, CompletedRefsAcc};
+reg_children(Ref, Children, RefsAcc, CompletedRefsAcc)
+  when map_size(Children) == 0 ->
+    CompletedRefsAcc1 = [Ref | CompletedRefsAcc],
+    {RefsAcc, CompletedRefsAcc1};
+
+reg_children(Ref, Children, RefsAcc, CompletedRefsAcc) ->
+    Fun = fun(InnerTag, #ref{ref=InnerRef,
+                        completion_fun=CompletionFun,
+                        children=InnerChildren},
+              {InnerRefsAcc, InnerCompletedAcc}) ->
+                    InnerRefsAcc1 = maps:put(InnerRef,
+                                             #ref_ret{tag=InnerTag,
+                                                      parent_ref=Ref,
+                                                      completion_fun=CompletionFun,
+                                                      children=children_set(InnerChildren),
+                                                      results=results_map(InnerChildren)},
+                                             InnerRefsAcc),
+            reg_children(InnerRef, InnerChildren, InnerRefsAcc1, InnerCompletedAcc)
+          end,
+    maps:fold(Fun, {RefsAcc, CompletedRefsAcc}, Children).

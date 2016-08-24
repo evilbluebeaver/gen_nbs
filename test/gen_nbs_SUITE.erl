@@ -619,7 +619,7 @@ test_transmit(_Config) ->
     gen_nbs:cast(Pid1, {transmit, gen_nbs:msg(Pid2, {ack, msg}, InvalidCompletionFun)}),
     ?WAIT_FOR_MSG({Pid2, {ack, msg, Pid1}}),
     timer:sleep(?TIMEOUT),
-    ?WAIT_FOR_MSG({Pid1, {error, unknown}}),
+    ?WAIT_FOR_MSG({Pid1, {fail, unknown}}),
 
     %%
     %% Ack (msgs list)
@@ -678,8 +678,18 @@ test_await(_Config) ->
 
     CompletionFun1 = fun(_) ->  error(unknown) end,
     Msg6 = gen_nbs:msg(Pid1, {ack, msg1}, CompletionFun1),
-    {error, unknown} = gen_nbs:await(Msg6),
+    {fail, unknown} = gen_nbs:await(Msg6),
     ?WAIT_FOR_MSG({Pid1, {ack, msg1, _}}),
+
+    Package6 = gen_nbs:package(#{}),
+    {ack, #{}} = gen_nbs:await(Package6),
+
+    Package7 = gen_nbs:package(#{tag1 => gen_nbs:msg(Pid1, {ack, msg1}),
+                                 tag2 => gen_nbs:package(#{})}),
+    #{tag1 := {ack, msg1},
+      tag2 := {ack, #{}}} = gen_nbs:await(Package7),
+    ?WAIT_FOR_MSG({Pid1, {ack, msg1, _}}),
+
     gen_nbs:stop(Pid1),
     gen_nbs:stop(Pid2),
     ok.

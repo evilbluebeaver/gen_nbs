@@ -262,7 +262,8 @@ await(Msg, Timeout) ->
                   Tag = make_ref(),
                   Refs = gen_nbs_refs:new(),
                   Await = gen_nbs:transmit(Msg, Tag, Timeout),
-                  Refs1 = gen_nbs_refs:reg(Await, Refs),
+                  {Refs1, Completed} = gen_nbs_refs:reg(Await, Refs),
+                  ok = complete_early(Completed),
                   Ack = do_receive(Tag, Refs1),
                   Self ! {return, Ack}
           end),
@@ -273,11 +274,11 @@ await(Msg, Timeout) ->
 
 do_receive(Tag, Refs) ->
     {Ref, Result, Msg} = receive
-                        {'DOWN', R, process, _Pid, _Info} ->
-                            {R, fail, down};
-                        ?ACK(R, Res, M) ->
-                            {R, Res, M}
-                    end,
+                             {'DOWN', R, process, _Pid, _Info} ->
+                                 {R, fail, down};
+                             ?ACK(R, Res, M) ->
+                                 {R, Res, M}
+                         end,
     true = demonitor(Ref),
     case gen_nbs_refs:use(Result, Msg, Ref, Refs) of
         {ok, Refs1} ->
@@ -568,16 +569,23 @@ handle_common_reply(Reply, Msg, InnerState) ->
             terminate(ExitReason, ReportReason, InnerState)
     end.
 
+complete_early(Completed) ->
+    Fun = fun(Ref) -> self() ! ?SUCCESS(Ref, #{}) end,
+    ok = lists:foreach(Fun, Completed).
+
+
 handle_inner_reply(Reply, Msg, InnerState=#inner_state{refs=Refs}) ->
     case Reply of
         {await, Await, NState} ->
-            NRefs = gen_nbs_refs:reg(Await, Refs),
+            {NRefs, Completed} = gen_nbs_refs:reg(Await, Refs),
+            ok = complete_early(Completed),
             NInnerState = InnerState#inner_state{state=NState,
                                                  refs=NRefs},
             NInnerState1 = debug(?AWAIT_RET(Await), NInnerState),
             NInnerState1#inner_state{timeout=infinity};
         {await, Await, NState, Time} ->
-            NRefs = gen_nbs_refs:reg(Await, Refs),
+            {NRefs, Completed} = gen_nbs_refs:reg(Await, Refs),
+            ok = complete_early(Completed),
             NInnerState = InnerState#inner_state{state=NState,
                                                  refs=NRefs},
             NInnerState1 = debug(?AWAIT_RET(Await), NInnerState),

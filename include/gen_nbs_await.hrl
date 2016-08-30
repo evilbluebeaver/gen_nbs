@@ -1,9 +1,12 @@
+-record(return, {payload, completion_fun}).
+
 -record(msg, {dest, payload, completion_fun}).
 
 -record(package, {children :: #{term() => #package{} | #msg{}},
                   completion_fun :: fun()}).
 
 -record(ref, {ref :: term(),
+              return :: boolean(),
               children :: #{term() => #ref{}},
               completion_fun :: fun((term()) -> term())}).
 

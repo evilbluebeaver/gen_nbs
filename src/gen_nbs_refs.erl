@@ -63,11 +63,11 @@ use_result(Results, Ref, #ref_ret{tag=Tag,
 fill_children_results(Reason, Ref, {Results, Refs}) ->
     case maps:take(Ref, Refs) of
         {#ref_ret{tag=Tag,
-                 children=undefined, results=undefined}, Refs1} ->
+                  children=undefined, results=undefined}, Refs1} ->
             {maps:put(Tag, {fail, Reason}, Results), Refs1};
         {#ref_ret{tag=Tag,
-                 children=Children,
-                 results=ChildrenResults}, Refs1} ->
+                  children=Children,
+                  results=ChildrenResults}, Refs1} ->
             Fun = fun(ChildRef, Acc) ->
                           fill_children_results(Reason, ChildRef, Acc)
                   end,
@@ -120,36 +120,50 @@ reg(Awaits, Refs) when is_list(Awaits) ->
 reg(#await{tag=Tag,
            timer_ref=TimerRef,
            ref=#ref{ref=Ref,
-                        completion_fun=CompletionFun,
-                        children=Children}}, Refs) ->
+                    return=Return,
+                    completion_fun=CompletionFun,
+                    children=Children}}, Refs) ->
     RefRet = #ref_ret{tag=Tag,
                       timer_ref=TimerRef,
                       completion_fun=CompletionFun,
                       children=children_set(Children),
                       results=results_map(Children)},
     RefsAcc = maps:put(Ref, RefRet, Refs),
-    CompletedRefsAcc = [],
+    CompletedRefsAcc = case Return of
+                           undefined ->
+                               [];
+                           Return ->
+                               [{Ref, Return}]
+                       end,
     reg_children(Ref, Children, RefsAcc, CompletedRefsAcc).
 
 reg_children(_Ref, undefined, RefsAcc, CompletedRefsAcc) ->
     {RefsAcc, CompletedRefsAcc};
 reg_children(Ref, Children, RefsAcc, CompletedRefsAcc)
   when map_size(Children) == 0 ->
-    CompletedRefsAcc1 = [Ref | CompletedRefsAcc],
+    CompletedRefsAcc1 = [{Ref, {ack, #{}}} | CompletedRefsAcc],
     {RefsAcc, CompletedRefsAcc1};
 
 reg_children(Ref, Children, RefsAcc, CompletedRefsAcc) ->
     Fun = fun(InnerTag, #ref{ref=InnerRef,
-                        completion_fun=CompletionFun,
-                        children=InnerChildren},
+                             return=InnerReturn,
+                             completion_fun=CompletionFun,
+                             children=InnerChildren},
               {InnerRefsAcc, InnerCompletedAcc}) ->
-                    InnerRefsAcc1 = maps:put(InnerRef,
-                                             #ref_ret{tag=InnerTag,
-                                                      parent_ref=Ref,
-                                                      completion_fun=CompletionFun,
-                                                      children=children_set(InnerChildren),
-                                                      results=results_map(InnerChildren)},
-                                             InnerRefsAcc),
-            reg_children(InnerRef, InnerChildren, InnerRefsAcc1, InnerCompletedAcc)
+                  InnerRefsAcc1 = maps:put(InnerRef,
+                                           #ref_ret{tag=InnerTag,
+                                                    parent_ref=Ref,
+                                                    completion_fun=CompletionFun,
+                                                    children=children_set(InnerChildren),
+                                                    results=results_map(InnerChildren)},
+                                           InnerRefsAcc),
+                  InnerCompletedAcc1 = case InnerReturn of
+                                           undefined ->
+                                               InnerCompletedAcc;
+                                           InnerReturn ->
+                                               [{InnerRef, InnerReturn} | InnerCompletedAcc]
+                                       end,
+                  reg_children(InnerRef, InnerChildren, InnerRefsAcc1, InnerCompletedAcc1)
           end,
     maps:fold(Fun, {RefsAcc, CompletedRefsAcc}, Children).
+

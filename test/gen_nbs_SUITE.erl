@@ -632,6 +632,19 @@ test_transmit(_Config) ->
     ?WAIT_FOR_MSG({Pid1, {ack, msg1}}),
     ?WAIT_FOR_MSG({Pid1, {ack, msg2}}),
 
+    gen_nbs:cast(Pid1, {transmit, gen_nbs:return({fail, some_return})}),
+    ?WAIT_FOR_MSG({Pid1, {fail, some_return}}),
+
+    gen_nbs:cast(Pid1, {transmit, gen_nbs:return(some_return)}),
+    ?WAIT_FOR_MSG({Pid1, {fail, some_return}}),
+
+    gen_nbs:cast(Pid1, {transmit, gen_nbs:return({ack, some_return},
+                                                 undefined)}),
+    ?WAIT_FOR_MSG({Pid1, {ack, some_return}}),
+
+    gen_nbs:cast(Pid1, {transmit, gen_nbs:return({fail, some_return},
+                                                 CompletionFun)}),
+    ?WAIT_FOR_MSG({Pid1, {ok, {fail, some_return}}}),
     gen_nbs:stop(Pid1),
     gen_nbs:stop(Pid2),
     gen_nbs:stop(Pid3),

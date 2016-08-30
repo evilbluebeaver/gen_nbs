@@ -23,7 +23,7 @@
          start_link/3, start_link/4,
          abcast/2, abcast/3,
          stop/1, stop/3,
-         msg/2, msg/3, package/1, package/2,
+         return/1, return/2, msg/2, msg/3, package/1, package/2,
          transmit/2, transmit/3,
          cast/2,
          await/1, await/2,
@@ -173,6 +173,15 @@ cast(Dest, Msg) ->
 %% Create a message to a generic server.
 %% -----------------------------------------------------------------
 
+return(Payload) ->
+    #return{payload=Payload}.
+
+return(Payload, CompletionFun) when CompletionFun == undefined ->
+    #return{payload=Payload, completion_fun=CompletionFun};
+
+return(Payload, CompletionFun) when is_function(CompletionFun) ->
+    #return{payload=Payload, completion_fun=CompletionFun}.
+
 msg(Dest, Payload) ->
     #msg{dest=Dest, payload=Payload}.
 
@@ -223,7 +232,12 @@ do_transmit(#msg{dest=Dest, payload=Payload,
     Ref = monitor(process, Name),
     From = ?FROM(self(), Ref),
     do_send(Name, ?MSG(From, Payload)),
-    #ref{ref=Ref, completion_fun=CompletionFun}.
+    #ref{ref=Ref, completion_fun=CompletionFun};
+
+do_transmit(#return{payload=Payload,
+                    completion_fun=CompletionFun}) ->
+    #ref{ref=make_ref(), return=Payload, completion_fun=CompletionFun}.
+
 
 %% -----------------------------------------------------------------
 %% Manual ack/fail
@@ -242,16 +256,6 @@ fail(?FROM(From, Ref), Reason) ->
 %% -----------------------------------------------------------------
 %% Expects the results without having to implement a gen_nbs behaviour
 %% -----------------------------------------------------------------
-
--define(CLEAN(Ref),
-        receive
-            ?ACK(Ref, _, _) ->
-                ok;
-            {'DOWN', Ref, process, _, _} ->
-                ok
-        after 0 ->
-                  ok
-        end).
 
 await(Msg) ->
     await(Msg, ?DEFAULT_TIMEOUT).
@@ -570,9 +574,14 @@ handle_common_reply(Reply, Msg, InnerState) ->
     end.
 
 complete_early(Completed) ->
-    Fun = fun(Ref) -> self() ! ?SUCCESS(Ref, #{}) end,
+    Fun = fun({Ref, {ack, Payload}}) ->
+                  self() ! ?SUCCESS(Ref, Payload);
+             ({Ref, {fail, Payload}}) ->
+                  self() ! ?FAIL(Ref, Payload);
+             ({Ref, Payload}) ->
+                  self() ! ?FAIL(Ref, Payload)
+          end,
     ok = lists:foreach(Fun, Completed).
-
 
 handle_inner_reply(Reply, Msg, InnerState=#inner_state{refs=Refs}) ->
     case Reply of

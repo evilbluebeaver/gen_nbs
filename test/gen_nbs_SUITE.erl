@@ -694,14 +694,14 @@ test_await(_Config) ->
     {fail, unknown} = gen_nbs:await(Msg6),
     ?WAIT_FOR_MSG({Pid1, {ack, msg1, _}}),
 
-    Package6 = gen_nbs:package(#{}),
-    {ack, #{}} = gen_nbs:await(Package6),
-
     Package7 = gen_nbs:package(#{tag1 => gen_nbs:msg(Pid1, {ack, msg1}),
                                  tag2 => gen_nbs:package(#{})}),
     #{tag1 := {ack, msg1},
-      tag2 := {ack, #{}}} = gen_nbs:await(Package7),
+      tag2 := #{}} = gen_nbs:await(Package7),
     ?WAIT_FOR_MSG({Pid1, {ack, msg1, _}}),
+
+    Package6 = gen_nbs:package(#{}),
+    #{} = gen_nbs:await(Package6),
 
     gen_nbs:stop(Pid1),
     gen_nbs:stop(Pid2),

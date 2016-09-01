@@ -31,17 +31,14 @@ use(Result, Data, Ref,
     Ret=#ref_ret{children=undefined, results=undefined}, Refs) ->
     use_result({Result, Data}, Ref, Ret, Refs);
 
-use(fail, Reason, _Ref,
-    #ref_ret{tag=Tag,
-             parent_ref=undefined,
-             timer_ref=TimerRef,
-             children=Children,
-             results=Results}, Refs) ->
+use(Result, Reason, Ref,
+    RefRet = #ref_ret{children=Children,
+                      results=Results}, Refs) ->
     Fun = fun(ChildRef, Acc) ->
-                  fill_children_results(Reason, ChildRef, Acc)
+                  fill_children_results(Result, Reason, ChildRef, Acc)
           end,
     {Results1, Refs1} = lists:foldl(Fun, {Results, Refs}, sets:to_list(Children)),
-    {ack, Results1, Tag, TimerRef, Refs1}.
+    use_result(Results1, Ref, RefRet, Refs1).
 
 use_result(Results, Ref, #ref_ret{tag=Tag,
                                   timer_ref=TimerRef,
@@ -60,16 +57,16 @@ use_result(Results, Ref, #ref_ret{tag=Tag,
             use_parent(CompleteResult, Ref, Tag, ParentRef, Refs)
     end.
 
-fill_children_results(Reason, Ref, {Results, Refs}) ->
+fill_children_results(Result, Reason, Ref, {Results, Refs}) ->
     case maps:take(Ref, Refs) of
         {#ref_ret{tag=Tag,
                   children=undefined, results=undefined}, Refs1} ->
-            {maps:put(Tag, {fail, Reason}, Results), Refs1};
+            {maps:put(Tag, {Result, Reason}, Results), Refs1};
         {#ref_ret{tag=Tag,
                   children=Children,
                   results=ChildrenResults}, Refs1} ->
             Fun = fun(ChildRef, Acc) ->
-                          fill_children_results(Reason, ChildRef, Acc)
+                          fill_children_results(Result, Reason, ChildRef, Acc)
                   end,
             {ChildrenResults2, Refs2} = lists:foldl(Fun, {ChildrenResults, Refs1},
                                                     sets:to_list(Children)),
@@ -94,14 +91,10 @@ use_parent(ChildResult, ChildRef, ChildTag, Ref, Refs) ->
 
 results_map(undefined) ->
     undefined;
-results_map(Children) when map_size(Children) == 0 ->
-    undefined;
 results_map(_) ->
     #{}.
 
 children_set(undefined) ->
-    undefined;
-children_set(Children) when map_size(Children) == 0 ->
     undefined;
 children_set(Children) ->
     Fun = fun(_Tag, #ref{ref=Ref}, Acc) ->

@@ -236,7 +236,15 @@ do_transmit(#msg{dest=Dest, payload=Payload,
 
 do_transmit(#return{payload=Payload,
                     completion_fun=CompletionFun}) ->
-    #ref{ref=make_ref(), return=Payload, completion_fun=CompletionFun}.
+    CompletionFun1 = fun({ack, Data}) ->
+                             case CompletionFun of
+                                 undefined ->
+                                     Data;
+                                 CompletionFun ->
+                                     CompletionFun(Data)
+                             end
+                     end,
+    #ref{ref=make_ref(), return=Payload, completion_fun=CompletionFun1}.
 
 
 %% -----------------------------------------------------------------
@@ -574,12 +582,8 @@ handle_common_reply(Reply, Msg, InnerState) ->
     end.
 
 complete_early(Completed) ->
-    Fun = fun({Ref, {ack, Payload}}) ->
-                  self() ! ?SUCCESS(Ref, Payload);
-             ({Ref, {fail, Payload}}) ->
-                  self() ! ?FAIL(Ref, Payload);
-             ({Ref, Payload}) ->
-                  self() ! ?FAIL(Ref, Payload)
+    Fun = fun({Ref, Result}) ->
+                  self() ! ?SUCCESS(Ref, Result)
           end,
     ok = lists:foreach(Fun, Completed).
 

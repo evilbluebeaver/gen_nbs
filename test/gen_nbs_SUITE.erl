@@ -384,6 +384,9 @@ test_info(_Config) ->
     Msg = message,
     Pid ! Msg,
     ?WAIT_FOR_MSG({Pid, {info, Msg}}),
+    DownMsg = {'DOWN', make_ref(), process, self(), some_info},
+    Pid ! DownMsg,
+    ?WAIT_FOR_MSG({Pid, {info, DownMsg}}),
     gen_nbs:stop(Pid),
     ?WAIT_FOR_EXIT(Pid),
     ok.

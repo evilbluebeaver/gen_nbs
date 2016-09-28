@@ -24,6 +24,7 @@ use(Result, Data, Ref, Refs) ->
         error ->
             {ok, Refs};
         {Ret, Refs1} ->
+            true = demonitor(Ref, [flush]),
             use(Result, Data, Ref, Ret, Refs1)
     end.
 
@@ -58,6 +59,7 @@ use_result(Results, Ref, #ref_ret{tag=Tag,
     end.
 
 fill_children_results(Result, Reason, Ref, {Results, Refs}) ->
+    true = demonitor(Ref, [flush]),
     case maps:take(Ref, Refs) of
         {#ref_ret{tag=Tag,
                   children=undefined, results=undefined}, Refs1} ->

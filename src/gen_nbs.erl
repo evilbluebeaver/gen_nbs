@@ -513,8 +513,14 @@ decode_msg(Msg, InnerState=#inner_state{parent=Parent,
 %% report.
 %% ---------------------------------------------------
 
-try_dispatch({'DOWN', Ref, process, _Pid, _Info}, Mod, State, Refs) ->
-    try_dispatch(?FAIL(Ref, down), Mod, State, Refs);
+try_dispatch(Info={'DOWN', Ref, process, _Pid, _Info}, Mod, State, Refs) ->
+    case maps:is_key(Ref, Refs) of
+        true ->
+            try_dispatch(?FAIL(Ref, down), Mod, State, Refs);
+        false ->
+            try_handle(Mod, handle_info, [Info, State], Refs)
+    end;
+
 try_dispatch(?CAST(Msg), Mod, State, Refs) ->
     try_handle(Mod, handle_cast, [Msg, State], Refs);
 try_dispatch(?MSG(From, Msg), Mod, State, Refs) ->

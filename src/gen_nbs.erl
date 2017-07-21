@@ -296,14 +296,14 @@ safe_call(Fun) ->
     Self = self(),
     Pid = spawn_link(fun() ->
                              Result = Fun(),
-                             Self ! Result
+                             Self ! {result, Result}
                      end),
     receive
-        {'EXIT', Pid, Reason} ->
-            exit(Reason);
-        Result ->
+        {result, Result} ->
             receive {'EXIT', Pid, normal} -> ok end,
-            Result
+            Result;
+        {'EXIT', Pid, Reason} when Reason /= normal ->
+            exit(Reason)
     end.
 
 do_receive(Tag, Refs) ->

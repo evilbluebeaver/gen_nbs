@@ -300,7 +300,7 @@ safe_call(Fun) ->
                      end),
     receive
         {result, Result} ->
-            receive {'EXIT', Pid, normal} -> ok end,
+            receive {'EXIT', Pid, normal} -> ok after 0 -> ok end,
             Result;
         {'EXIT', Pid, Reason} when Reason /= normal ->
             exit(Reason)

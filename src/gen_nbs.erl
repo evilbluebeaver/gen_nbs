@@ -27,6 +27,7 @@
          transmit/2, transmit/3,
          cast/2,
          await/1, await/2,
+         safe_call/1, safe_call/3,
          ack/2, fail/2,
          enter_loop/3, enter_loop/4, enter_loop/5, wake_hib/1]).
 
@@ -282,6 +283,27 @@ await(Msg, Timeout) ->
     receive
         {return, Ack} ->
             Ack
+    end.
+
+%% -----------------------------------------------------------------
+%% Executes gen_server's call safely. Prevent from getting of excess messages in case of
+%% gen_server timeout or fail.
+%% -----------------------------------------------------------------
+safe_call(Module, Fun, Args) ->
+    safe_call(fun() -> erlang:apply(Module, Fun, Args) end).
+
+safe_call(Fun) ->
+    Self = self(),
+    Pid = spawn_link(fun() ->
+                             Result = Fun(),
+                             Self ! Result
+                     end),
+    receive
+        {'EXIT', Pid, Reason} ->
+            exit(Reason);
+        Result ->
+            receive {'EXIT', Pid, normal} -> ok end,
+            Result
     end.
 
 do_receive(Tag, Refs) ->

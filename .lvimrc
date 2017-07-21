@@ -1,1 +1,2 @@
 let g:session_directory="."
+let g:coverme_coverfile="_build/test/cover/coverme"

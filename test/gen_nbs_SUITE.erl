@@ -29,6 +29,7 @@
          test_send/1,
          test_transmit/1,
          test_await/1,
+         test_safe_call/1,
          test_misc/1,
          test_format_status/1,
          test_error/1]).
@@ -59,7 +60,7 @@
 groups() ->
     [{transmit, [], [test_transmit, test_await]},
      {messages, [], [test_msg, test_package]},
-     {stuff, [], [test_format_status, test_start, test_sys]},
+     {stuff, [], [test_format_status, test_start, test_sys, test_safe_call]},
      {send, [], [test_cast, test_info, test_misc, test_error, test_send, test_abcast]},
      {enter_loop, [], [test_enter_loop, test_enter_loop_local, test_enter_loop_global, test_enter_loop_via]}].
 
@@ -708,6 +709,17 @@ test_await(_Config) ->
 
     gen_nbs:stop(Pid1),
     gen_nbs:stop(Pid2),
+    ok.
+
+test_safe_call(_Config) ->
+    {ok, Pid} = gen_nbs_test_gen_server:start(),
+    ok = gen_nbs_test_gen_server:normal_call(Pid),
+    ok = gen_nbs:safe_call(gen_nbs_test_gen_server, normal_call, [Pid]),
+
+    {'EXIT', {timeout, _}} = (catch gen_nbs:safe_call(gen_nbs_test_gen_server, timeout_call, [Pid])),
+    {'EXIT', {normal, _}} = (catch gen_nbs:safe_call(gen_nbs_test_gen_server, exit_call, [Pid])),
+
+    false = erlang:is_process_alive(Pid),
     ok.
 
 test_format_status(_Config) ->

@@ -294,15 +294,16 @@ safe_call(Module, Fun, Args) ->
 
 safe_call(Fun) ->
     Self = self(),
-    Pid = spawn_link(fun() ->
-                             Result = Fun(),
-                             Self ! {result, Result}
-                     end),
+    Pid = spawn(fun() ->
+                        Result = Fun(),
+                        Self ! {result, Result}
+                end),
+    Ref = erlang:monitor(process, Pid),
     receive
         {result, Result} ->
-            receive {'EXIT', Pid, normal} -> ok after 0 -> ok end,
+            true = erlang:demonitor(Ref, [flush]),
             Result;
-        {'EXIT', Pid, Reason} when Reason /= normal ->
+        {'DOWN', Ref, process, Pid, Reason} when Reason /= normal ->
             exit(Reason)
     end.
 

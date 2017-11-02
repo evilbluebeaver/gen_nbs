@@ -52,7 +52,8 @@ handle_cast({transmit_timeout, Msg, Timeout}, State) ->
 
 handle_cast({transmit, Msgs}, State) when is_list(Msgs) ->
     Fun = fun(Msg) -> gen_nbs:transmit(Msg, make_ref()) end,
-    {await, lists:map(Fun, Msgs), State};
+    Awaits = lists:map(Fun, Msgs),
+    {await, Awaits, State};
 
 handle_cast({transmit, Msg}, State) ->
     Await = gen_nbs:transmit(Msg, make_ref()),

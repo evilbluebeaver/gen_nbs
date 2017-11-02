@@ -6,7 +6,6 @@
                   completion_fun :: fun()}).
 
 -record(ref, {ref :: term(),
-              return :: boolean(),
               children :: #{term() => #ref{}},
               completion_fun :: fun((term()) -> term())}).
 

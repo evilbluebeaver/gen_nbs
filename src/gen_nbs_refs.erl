@@ -105,17 +105,11 @@ children_set(Children) ->
     maps:fold(Fun, sets:new(), Children).
 
 reg(Awaits, Refs) when is_list(Awaits) ->
-    Fun = fun(Ref, {RefsAcc, CompletedAcc}) ->
-                  {RefsAcc1, Completed} = reg(Ref, RefsAcc),
-                  CompletedAcc1 = CompletedAcc ++ Completed,
-                  {RefsAcc1, CompletedAcc1}
-          end,
-    lists:foldl(Fun, {Refs, []}, Awaits);
+    lists:foldl(fun reg/2, Refs, Awaits);
 
 reg(#await{tag=Tag,
            timer_ref=TimerRef,
            ref=#ref{ref=Ref,
-                    return=Return,
                     completion_fun=CompletionFun,
                     children=Children}}, Refs) ->
     RefRet = #ref_ret{tag=Tag,
@@ -124,27 +118,16 @@ reg(#await{tag=Tag,
                       children=children_set(Children),
                       results=results_map(Children)},
     RefsAcc = maps:put(Ref, RefRet, Refs),
-    CompletedRefsAcc = case Return of
-                           undefined ->
-                               [];
-                           Return ->
-                               [{Ref, Return}]
-                       end,
-    reg_children(Ref, Children, RefsAcc, CompletedRefsAcc).
+    reg_children(Ref, Children, RefsAcc).
 
-reg_children(_Ref, undefined, RefsAcc, CompletedRefsAcc) ->
-    {RefsAcc, CompletedRefsAcc};
-reg_children(Ref, Children, RefsAcc, CompletedRefsAcc)
-  when map_size(Children) == 0 ->
-    CompletedRefsAcc1 = [{Ref, {ack, #{}}} | CompletedRefsAcc],
-    {RefsAcc, CompletedRefsAcc1};
+reg_children(_Ref, undefined, RefsAcc) ->
+    RefsAcc;
 
-reg_children(Ref, Children, RefsAcc, CompletedRefsAcc) ->
+reg_children(Ref, Children, RefsAcc) ->
     Fun = fun(InnerTag, #ref{ref=InnerRef,
-                             return=InnerReturn,
                              completion_fun=CompletionFun,
                              children=InnerChildren},
-              {InnerRefsAcc, InnerCompletedAcc}) ->
+              InnerRefsAcc) ->
                   InnerRefsAcc1 = maps:put(InnerRef,
                                            #ref_ret{tag=InnerTag,
                                                     parent_ref=Ref,
@@ -152,13 +135,7 @@ reg_children(Ref, Children, RefsAcc, CompletedRefsAcc) ->
                                                     children=children_set(InnerChildren),
                                                     results=results_map(InnerChildren)},
                                            InnerRefsAcc),
-                  InnerCompletedAcc1 = case InnerReturn of
-                                           undefined ->
-                                               InnerCompletedAcc;
-                                           InnerReturn ->
-                                               [{InnerRef, InnerReturn} | InnerCompletedAcc]
-                                       end,
-                  reg_children(InnerRef, InnerChildren, InnerRefsAcc1, InnerCompletedAcc1)
+                  reg_children(InnerRef, InnerChildren, InnerRefsAcc1)
           end,
-    maps:fold(Fun, {RefsAcc, CompletedRefsAcc}, Children).
+    maps:fold(Fun, RefsAcc, Children).
 

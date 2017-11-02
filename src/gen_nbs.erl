@@ -245,7 +245,9 @@ do_transmit(#return{payload=Payload,
                                      CompletionFun(Data)
                              end
                      end,
-    #ref{ref=make_ref(), return=Payload, completion_fun=CompletionFun1}.
+    Ref = make_ref(),
+    erlang:send(self(), ?SUCCESS(Ref, Payload)),
+    #ref{ref=Ref, completion_fun=CompletionFun1}.
 
 
 %% -----------------------------------------------------------------
@@ -275,8 +277,7 @@ await(Msg, Timeout) ->
                   Tag = make_ref(),
                   Refs = gen_nbs_refs:new(),
                   Await = gen_nbs:transmit(Msg, Tag, Timeout),
-                  {Refs1, Completed} = gen_nbs_refs:reg(Await, Refs),
-                  ok = complete_early(Completed),
+                  Refs1 = gen_nbs_refs:reg(Await, Refs),
                   Ack = do_receive(Tag, Refs1),
                   Self ! {return, Ack}
           end),
@@ -610,52 +611,32 @@ handle_common_reply(Reply, Msg, InnerState) ->
             terminate(ExitReason, ReportReason, InnerState)
     end.
 
-complete_early(Completed) ->
-    Fun = fun({Ref, Result}) ->
-                  self() ! ?SUCCESS(Ref, Result)
-          end,
-    ok = lists:foreach(Fun, Completed).
-
 handle_inner_reply(Reply, Msg, InnerState=#inner_state{refs=Refs}) ->
     case Reply of
-        {await, Await, NState} ->
-            {NRefs, Completed} = gen_nbs_refs:reg(Await, Refs),
-            ok = complete_early(Completed),
-            NInnerState = InnerState#inner_state{state=NState,
-                                                 refs=NRefs},
-            NInnerState1 = debug(?AWAIT_RET(Await), NInnerState),
-            NInnerState1#inner_state{timeout=infinity};
+        {await, Await, NState}->
+            handle_inner_reply({await, Await, NState, infinity}, Msg, InnerState);
         {await, Await, NState, Time} ->
-            {NRefs, Completed} = gen_nbs_refs:reg(Await, Refs),
-            ok = complete_early(Completed),
+            NRefs = gen_nbs_refs:reg(Await, Refs),
             NInnerState = InnerState#inner_state{state=NState,
                                                  refs=NRefs},
             NInnerState1 = debug(?AWAIT_RET(Await), NInnerState),
             NInnerState1#inner_state{timeout=Time};
-        {ack, ?FROM(From, Ref)=Tag, Ack, NState} ->
-            From ! ?SUCCESS(Ref, Ack),
-            NInnerState = debug(?ACK_RET(Tag),
-                                InnerState#inner_state{state=NState}),
-            NInnerState#inner_state{timeout=infinity};
+        {ack, ?FROM(_From, _Ref)=Tag, Ack, NState} ->
+            handle_inner_reply({ack, Tag, Ack, NState, infinity}, Msg, InnerState);
         {ack, ?FROM(From, Ref)=Tag, Ack, NState, Time} ->
             From ! ?SUCCESS(Ref, Ack),
             NInnerState = debug(?ACK_RET(Tag),
                                 InnerState#inner_state{state=NState}),
             NInnerState#inner_state{timeout=Time};
-        {fail, ?FROM(From, Ref)=Tag, Reason, NState} ->
-            From ! ?FAIL(Ref, Reason),
-            NInnerState = debug(?FAIL_RET(Tag),
-                                InnerState#inner_state{state=NState}),
-            NInnerState#inner_state{timeout=infinity};
+        {fail, ?FROM(_From, _Ref)=Tag, Reason, NState} ->
+            handle_inner_reply({fail, Tag, Reason, NState, infinity}, Msg, InnerState);
         {fail, ?FROM(From, Ref)=Tag, Reason, NState, Time} ->
             From ! ?FAIL(Ref, Reason),
             NInnerState = debug(?FAIL_RET(Tag),
                                 InnerState#inner_state{state=NState}),
             NInnerState#inner_state{timeout=Time};
         {ok, NState} ->
-            NInnerState = debug(?OK_RET(NState),
-                                InnerState#inner_state{state=NState}),
-            NInnerState#inner_state{timeout=infinity};
+            handle_inner_reply({ok, NState, infinity}, Msg, InnerState);
         {ok, NState, Time} ->
             NInnerState = debug(?OK_RET(NState),
                                 InnerState#inner_state{state=NState}),

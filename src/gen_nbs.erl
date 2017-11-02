@@ -237,17 +237,14 @@ do_transmit(#msg{dest=Dest, payload=Payload,
 
 do_transmit(#return{payload=Payload,
                     completion_fun=CompletionFun}) ->
-    CompletionFun1 = fun({ack, Data}) ->
-                             case CompletionFun of
-                                 undefined ->
-                                     Data;
-                                 CompletionFun ->
-                                     CompletionFun(Data)
-                             end
-                     end,
     Ref = make_ref(),
-    erlang:send(self(), ?SUCCESS(Ref, Payload)),
-    #ref{ref=Ref, completion_fun=CompletionFun1}.
+    case Payload of
+        {ack, Data} ->
+            erlang:send(self(), ?SUCCESS(Ref, Data));
+        {fail, Reason} ->
+            erlang:send(self(), ?FAIL(Ref, Reason))
+    end,
+    #ref{ref=Ref, completion_fun=CompletionFun}.
 
 
 %% -----------------------------------------------------------------

@@ -1,7 +1,7 @@
 sudo: false
 language: erlang
 otp_release:
-  - 20.2
+  - 20.0
 before_install:
   - pip install --user codecov
 script: rebar3 ct

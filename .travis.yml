@@ -1,7 +1,9 @@
 language: erlang
 otp_release:
   - 20.2
-install:
-    pip install codecov
+before_install:
+  - pip install codecov
+script: bin/rebar3 ct
 after_success:
-    codecov
+  - bin/covertool -cover _build/test/cover/ct.coverdata -appname gen_nbs -output cobertura.xml
+  - codecov

@@ -7,4 +7,4 @@ before_install:
 script: rebar3 ct
 after_success:
   - _build/default/bin/covertool -cover _build/test/cover/ct.coverdata -appname gen_nbs -output cobertura.xml
-  - codecov
+  - codecov --file cobertura.xml

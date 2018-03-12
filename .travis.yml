@@ -4,7 +4,7 @@ otp_release:
   - 20.2
 before_install:
   - pip install --user codecov
-script: bin/rebar3 ct
+script: rebar3 ct
 after_success:
-  - bin/covertool -cover _build/test/cover/ct.coverdata -appname gen_nbs -output cobertura.xml
+  - _build/default/bin/covertool -cover _build/test/cover/ct.coverdata -appname gen_nbs -output cobertura.xml
   - codecov

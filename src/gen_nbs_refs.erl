@@ -6,6 +6,8 @@
 
 -include("gen_nbs_await.hrl").
 
+-type refs() :: #{reference() => #ref_ret{}}.
+-spec new() -> refs().
 new() ->
     #{}.
 
@@ -19,6 +21,9 @@ complete(CompletionFun, Data) ->
             {fail, Reason}
     end.
 
+-spec use(Result :: ack | fail, Data :: term(),
+          Ref :: reference(), Refs :: refs()) -> {ok, refs()} |
+                                                 {ack, msg_result(), term(), reference() | undefined, refs()}.
 use(Result, Data, Ref, Refs) ->
     case maps:take(Ref, Refs) of
         error ->
@@ -104,6 +109,7 @@ children_set(Children) ->
           end,
     maps:fold(Fun, sets:new(), Children).
 
+-spec reg(await() | [await()], refs()) -> refs().
 reg(Awaits, Refs) when is_list(Awaits) ->
     lists:foldl(fun reg/2, Refs, Awaits);
 

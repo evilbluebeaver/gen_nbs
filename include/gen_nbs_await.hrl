@@ -1,13 +1,18 @@
--record(return, {payload, completion_fun}).
 
--record(msg, {dest, payload, completion_fun}).
+-type msg_result() :: {ack, term()} | {fail | term()}.
+-type package_result() :: #{term => msg_result() | package_result()}.
+-type completion_fun() :: undefined | fun((msg_result() | package_result()) -> msg_result()).
+
+-record(return, {payload :: term(), completion_fun :: completion_fun()}).
+
+-record(msg, {dest, payload :: term(), completion_fun :: completion_fun()}).
 
 -record(package, {children :: #{term() => #package{} | #msg{}},
-                  completion_fun :: fun()}).
+                  completion_fun :: completion_fun()}).
 
 -record(ref, {ref :: term(),
-              children :: #{term() => #ref{}},
-              completion_fun :: fun((term()) -> term())}).
+              children :: #{term() => #ref{}} | undefined,
+              completion_fun :: completion_fun()}).
 
 -record(await, {tag :: term(),
                 timer_ref :: reference(),
@@ -15,13 +20,13 @@
 
 
 -type await() :: #await{}.
+-type msg() :: #{term() => msg()} | #msg{} | #package{} | #return{}.
 
-
--record(ref_ret, {tag,
-                  parent_ref,
-                  timer_ref,
-                  completion_fun,
-                  children,
-                  results}).
+-record(ref_ret, {tag :: term(),
+                  parent_ref :: reference() | undefined,
+                  timer_ref :: reference() | undefined,
+                  completion_fun :: completion_fun(),
+                  children :: sets:sets() | undefined,
+                  results :: #{} | undefined}).
 
 

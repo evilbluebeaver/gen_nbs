@@ -25,9 +25,9 @@
          stop/1, stop/3,
          return/1, return/2, msg/2, msg/3, package/1, package/2,
          transmit/2, transmit/3,
+         safe_call/1, safe_call/3,
          cast/2,
          await/1, await/2,
-         safe_call/1, safe_call/3,
          ack/2, fail/2,
          enter_loop/3, enter_loop/4, enter_loop/5, wake_hib/1]).
 
@@ -53,6 +53,7 @@
 -type dest() :: pid() | atom() | {atom(), atom()} | {global, atom()} | {via, atom(), term()}.
 -type options() :: [atom() | tuple()].
 -type from() :: {pid(), reference()}.
+
 %-type result_r() :: {ack, term()} | {fail, term()}.
 %-type result() :: result_r() | [result_r()].
 -type callback_result() ::
@@ -64,10 +65,9 @@
 {await, Await :: await(), NewState :: term(), timeout() | hibernate} |
 {ok, NewState :: term()} |
 {ok, NewState :: term(), timeout() | hibernate} |
-{stop, Reason :: term(), Reply :: term(), NewState :: term()} |
 {stop, Reason :: term(), NewState :: term()}.
 
--export_type([await/0]).
+-export_type([await/0, msg/0]).
 %%%=========================================================================
 %%%  Callback API
 %%%=========================================================================
@@ -174,27 +174,34 @@ cast(Dest, Msg) ->
 %% Create a message to a generic server.
 %% -----------------------------------------------------------------
 
+-spec return(Payload :: term()) -> msg().
 return(Payload) ->
     #return{payload=Payload}.
 
+-spec return(Payload :: term(),
+             CompletionFun :: completion_fun()) -> msg().
 return(Payload, CompletionFun) when CompletionFun == undefined ->
     #return{payload=Payload, completion_fun=CompletionFun};
-
 return(Payload, CompletionFun) when is_function(CompletionFun) ->
     #return{payload=Payload, completion_fun=CompletionFun}.
 
+-spec msg(Dest :: dest(), Payload :: term()) -> msg().
 msg(Dest, Payload) ->
     #msg{dest=Dest, payload=Payload}.
 
+-spec msg(Dest :: dest(), Payload :: term(),
+          CompletionFun :: completion_fun()) -> msg().
 msg(Dest, Payload, CompletionFun) when CompletionFun == undefined ->
     #msg{dest=Dest, payload=Payload, completion_fun=CompletionFun};
-
 msg(Dest, Payload, CompletionFun) when is_function(CompletionFun) ->
     #msg{dest=Dest, payload=Payload, completion_fun=CompletionFun}.
 
+-spec package(Msgs :: #{term() => msg()}) -> msg().
 package(Msgs) when is_map(Msgs) ->
     #package{children=Msgs}.
 
+-spec package(Msgs :: #{term() => msg()},
+              CompletionFun :: completion_fun()) -> msg().
 package(Msgs, CompletionFun) when is_map(Msgs), CompletionFun == undefined->
     #package{children=Msgs, completion_fun=CompletionFun};
 
@@ -205,9 +212,11 @@ package(Msgs, CompletionFun) when is_map(Msgs), is_function(CompletionFun)->
 %% Transmit created messages
 %% -----------------------------------------------------------------
 
+-spec transmit(Msgs :: msg(), Tag :: term()) -> await().
 transmit(Msgs, Tag) ->
     transmit(Msgs, Tag, ?DEFAULT_TIMEOUT).
 
+-spec transmit(Msgs :: msg(), Tag :: term(), Timeout :: timeout()) -> await().
 transmit(Msg, Tag, Timeout) ->
     Ref = do_transmit(Msg),
     TimerRef = erlang:send_after(Timeout, self(), ?FAIL(Ref#ref.ref, timeout)),
@@ -246,6 +255,34 @@ do_transmit(#return{payload=Payload,
     end,
     #ref{ref=Ref, completion_fun=CompletionFun}.
 
+%% -----------------------------------------------------------------
+%% Executes gen_server's call safely. Prevent from getting of excess messages in case of
+%% gen_server timeout or fail.
+%% -----------------------------------------------------------------
+
+-spec safe_call(Module :: atom(),
+                Fun :: atom(),
+                Args :: [term()]) ->
+    term().
+safe_call(Module, Fun, Args) ->
+    safe_call(fun() -> erlang:apply(Module, Fun, Args) end).
+
+-spec safe_call(Fun :: fun(() -> term())) ->
+    term().
+safe_call(Fun) ->
+    Self = self(),
+    Pid = spawn(fun() ->
+                        Result = Fun(),
+                        Self ! {result, Result}
+                end),
+    Ref = erlang:monitor(process, Pid),
+    receive
+        {result, Result} ->
+            true = erlang:demonitor(Ref, [flush]),
+            Result;
+        {'DOWN', Ref, process, Pid, Reason} when Reason /= normal ->
+            exit(Reason)
+    end.
 
 %% -----------------------------------------------------------------
 %% Manual ack/fail
@@ -265,9 +302,11 @@ fail(?FROM(From, Ref), Reason) ->
 %% Expects the results without having to implement a gen_nbs behaviour
 %% -----------------------------------------------------------------
 
+-spec await(Msgs :: msg()) -> term().
 await(Msg) ->
     await(Msg, ?DEFAULT_TIMEOUT).
 
+-spec await(Msgs :: msg(), Timeout :: timeout()) -> term().
 await(Msg, Timeout) ->
     Self = self(),
     spawn(fun() ->
@@ -281,28 +320,6 @@ await(Msg, Timeout) ->
     receive
         {return, Ack} ->
             Ack
-    end.
-
-%% -----------------------------------------------------------------
-%% Executes gen_server's call safely. Prevent from getting of excess messages in case of
-%% gen_server timeout or fail.
-%% -----------------------------------------------------------------
-safe_call(Module, Fun, Args) ->
-    safe_call(fun() -> erlang:apply(Module, Fun, Args) end).
-
-safe_call(Fun) ->
-    Self = self(),
-    Pid = spawn(fun() ->
-                        Result = Fun(),
-                        Self ! {result, Result}
-                end),
-    Ref = erlang:monitor(process, Pid),
-    receive
-        {result, Result} ->
-            true = erlang:demonitor(Ref, [flush]),
-            Result;
-        {'DOWN', Ref, process, Pid, Reason} when Reason /= normal ->
-            exit(Reason)
     end.
 
 do_receive(Tag, Refs) ->

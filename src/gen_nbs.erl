@@ -98,9 +98,9 @@
 
 -define(FROM(What, Ref), {What, Ref}).
 
--define(ACK(Ref, Result, Ack),  {'$gen_ack', Result, Ref, Ack}).
--define(SUCCESS(Ref, Ack),      ?ACK(Ref, ack, Ack)).
--define(FAIL(Ref, Reason),      ?ACK(Ref, fail, Reason)).
+-define(RES(Ref, Result, Ack),  {'$gen_ack', Result, Ref, Ack}).
+-define(ACK(Ref, Ack),      ?RES(Ref, ack, Ack)).
+-define(FAIL(Ref, Reason),      ?RES(Ref, fail, Reason)).
 
 -define(CAST(Msg),        {'$gen_cast', Msg}).
 -define(MSG(From, Msg),   {'$gen_msg',  From, Msg}).
@@ -249,15 +249,15 @@ do_transmit(#return{payload=Payload,
     Ref = make_ref(),
     case Payload of
         {ack, Data} ->
-            erlang:send(self(), ?SUCCESS(Ref, Data));
+            erlang:send(self(), ?ACK(Ref, Data));
         {fail, Reason} ->
             erlang:send(self(), ?FAIL(Ref, Reason))
     end,
     #ref{ref=Ref, completion_fun=CompletionFun}.
 
 %% -----------------------------------------------------------------
-%% Executes gen_server's call safely. Prevent from getting of excess messages in case of
-%% gen_server timeout or fail.
+%% Executes gen_nbs's call safely. Prevent from getting of excess messages in case of
+%% gen_nbs timeout or fail.
 %% -----------------------------------------------------------------
 
 -spec safe_call(Module :: atom(),
@@ -290,7 +290,7 @@ safe_call(Fun) ->
 
 -spec ack(From :: from(), Ack :: term()) -> ok.
 ack(?FROM(From, Ref), Ack) ->
-    From ! ?SUCCESS(Ref, Ack),
+    From ! ?ACK(Ref, Ack),
     ok.
 
 -spec fail(From :: from(), Reason :: term()) -> ok.
@@ -326,7 +326,7 @@ do_receive(Tag, Refs) ->
     {Ref, Result, Msg} = receive
                              {'DOWN', R, process, _Pid, _Info} ->
                                  {R, fail, down};
-                             ?ACK(R, Res, M) ->
+                             ?RES(R, Res, M) ->
                                  {R, Res, M}
                          end,
     true = demonitor(Ref, [flush]),
@@ -387,15 +387,6 @@ do_default_send(Dest, Cmd) ->
     end,
     ok.
 
-
--record(inner_state, {parent,
-                      name,
-                      state,
-                      mod,
-                      timeout,
-                      debug,
-                      refs=gen_nbs_refs:new()}).
-
 %%-----------------------------------------------------------------
 %% enter_loop(Mod, Options, State, <ServerName>, <TimeOut>) ->_
 %%
@@ -424,12 +415,13 @@ enter_loop(Mod, Options, State, ServerName, Timeout) ->
     Name = get_proc_name(ServerName),
     Parent = get_parent(),
     Debug = debug_options(Name, Options),
-    InnerState = #inner_state{parent=Parent,
-                              name=Name,
-                              state=State,
-                              mod=Mod,
-                              timeout=Timeout,
-                              debug=Debug},
+    InnerState = #{parent => Parent,
+                   name => Name,
+                   state => State,
+                   mod => Mod,
+                   timeout => Timeout,
+                   refs => gen_nbs_refs:new(),
+                   debug => Debug},
     loop(InnerState).
 
 %%%========================================================================
@@ -448,17 +440,20 @@ init_it(Starter, self, Name, Mod, Args, Options) ->
 init_it(Starter, Parent, Name0, Mod, Args, Options) ->
     Name = name(Name0),
     Debug = debug_options(Name, Options),
-    InnerState = #inner_state{parent=Parent,
-                              name=Name,
-                              mod=Mod,
-                              debug=Debug},
+    InnerState = #{parent => Parent,
+                   name => Name,
+                   mod => Mod,
+                   refs => gen_nbs_refs:new(),
+                   debug => Debug},
     case catch Mod:init(Args) of
         {ok, State} ->
             proc_lib:init_ack(Starter, {ok, self()}),
-            loop(InnerState#inner_state{state=State, timeout=infinity});
+            loop(InnerState#{state => State,
+                             timeout => infinity});
         {ok, State, Timeout} ->
             proc_lib:init_ack(Starter, {ok, self()}),
-            loop(InnerState#inner_state{state=State, timeout=Timeout});
+            loop(InnerState#{state => State,
+                             timeout => Timeout});
         {stop, Reason} ->
             %% For consistency, we must make sure that the
             %% registered name (if any) is unregistered before
@@ -503,9 +498,9 @@ unregister_name(Pid) when is_pid(Pid) ->
 %%% ---------------------------------------------------
 %%% The MAIN loop.
 %%% ---------------------------------------------------
-loop(InnerState=#inner_state{timeout=hibernate}) ->
+loop(InnerState=#{timeout:=hibernate}) ->
     proc_lib:hibernate(?MODULE, wake_hib, [InnerState]);
-loop(InnerState=#inner_state{timeout=Timeout}) ->
+loop(InnerState=#{timeout:=Timeout}) ->
     Msg = receive
               Input ->
                   Input
@@ -521,10 +516,10 @@ wake_hib(InnerState) ->
           end,
     decode_msg(Msg, InnerState).
 
-decode_msg(Msg, InnerState=#inner_state{parent=Parent,
-                                        name=Name,
-                                        debug=Debug,
-                                        timeout=Timeout}) ->
+decode_msg(Msg, InnerState=#{parent:=Parent,
+                             name:=Name,
+                             debug:=Debug,
+                             timeout:=Timeout}) ->
     case Msg of
         {system, From, Req} ->
             sys:handle_system_msg(Req, From, Parent, ?MODULE, Debug,
@@ -536,7 +531,7 @@ decode_msg(Msg, InnerState=#inner_state{parent=Parent,
         _Msg ->
             Debug1 = sys:handle_debug(Debug, fun print_event/3,
                                       Name, Msg),
-            handle_msg(Msg, InnerState#inner_state{debug=Debug1})
+            handle_msg(Msg, InnerState#{debug:=Debug1})
     end.
 
 %% ---------------------------------------------------
@@ -563,7 +558,7 @@ try_dispatch(?CAST(Msg), Mod, State, Refs) ->
     try_handle(Mod, handle_cast, [Msg, State], Refs);
 try_dispatch(?MSG(From, Msg), Mod, State, Refs) ->
     try_handle(Mod, handle_msg, [Msg, From, State], Refs);
-try_dispatch(?ACK(Ref, Result, Reason), Mod, State, Refs) ->
+try_dispatch(?RES(Ref, Result, Reason), Mod, State, Refs) ->
     true = demonitor(Ref, [flush]),
     case gen_nbs_refs:use(Result, Reason, Ref, Refs) of
         {ok, Refs1} ->
@@ -609,94 +604,141 @@ try_terminate(Mod, Reason, State, Refs) ->
 %%% Message handling functions
 %%% ---------------------------------------------------
 
-handle_msg(Msg, InnerState=#inner_state{mod=Mod, state=State,
-                                        refs=Refs}) ->
+handle_msg(Msg, InnerState=#{mod:=Mod,
+                             state:=State,
+                             refs:=Refs}) ->
     Reply = try_dispatch(Msg, Mod, State, Refs),
-    handle_common_reply(Reply, Msg, InnerState).
-
-handle_common_reply(Reply, Msg, InnerState) ->
     case Reply of
         {ok, NRefs} ->
-            loop(InnerState#inner_state{refs=NRefs});
+            loop(InnerState#{refs => NRefs});
         {ok, InnerReply, NRefs} ->
-            loop(handle_inner_reply(InnerReply, Msg,
-                                    InnerState#inner_state{refs=NRefs}));
+            NState = handle_inner_reply(InnerReply, Msg,
+                                        InnerState#{refs => NRefs}),
+            loop(NState);
         {'EXIT', ExitReason, ReportReason} ->
             terminate(ExitReason, ReportReason, InnerState)
     end.
 
-handle_inner_reply(Reply, Msg, InnerState=#inner_state{refs=Refs}) ->
+handle_inner_reply(Reply, Msg, InnerState=#{refs:=Refs, debug:=[]}) ->
     case Reply of
         {await, Await, NState}->
-            handle_inner_reply({await, Await, NState, infinity}, Msg, InnerState);
+            NRefs = gen_nbs_refs:reg(Await, Refs),
+            InnerState#{state => NState,
+                                      refs => NRefs,
+                                      timeout => infinity};
         {await, Await, NState, Time} ->
             NRefs = gen_nbs_refs:reg(Await, Refs),
-            NInnerState = InnerState#inner_state{state=NState,
-                                                 refs=NRefs},
-            NInnerState1 = debug(?AWAIT_RET(Await), NInnerState),
-            NInnerState1#inner_state{timeout=Time};
-        {ack, ?FROM(_From, _Ref)=Tag, Ack, NState} ->
-            handle_inner_reply({ack, Tag, Ack, NState, infinity}, Msg, InnerState);
+            InnerState#{state => NState,
+                                      refs => NRefs,
+                                      timeout => Time};
+        {ack, ?FROM(From, Ref), Ack, NState} ->
+            From ! ?ACK(Ref, Ack),
+            InnerState#{state => NState,
+                        timeout => infinity};
+        {ack, ?FROM(From, Ref), Ack, NState, Time} ->
+            From ! ?ACK(Ref, Ack),
+            InnerState#{state => NState,
+                        timeout => Time};
+        {fail, ?FROM(From, Ref), Reason, NState} ->
+            From ! ?FAIL(Ref, Reason),
+            InnerState#{state => NState,
+                        timeout => infinity};
+        {fail, ?FROM(From, Ref), Reason, NState, Time} ->
+            From ! ?FAIL(Ref, Reason),
+            InnerState#{state => NState,
+                        timeout => Time};
+        {ok, NState} ->
+            InnerState#{state => NState,
+                        timeout => infinity};
+        {ok, NState, Time} ->
+            InnerState#{state => NState,
+                        timeout => Time};
+        {stop, Reason, NState} ->
+            terminate(Reason, Msg, InnerState#{state => NState});
+        BadReply ->
+            terminate({bad_return_value, BadReply}, Msg, InnerState)
+    end;
+
+handle_inner_reply(Reply, Msg, InnerState=#{refs:=Refs}) ->
+    case Reply of
+        {await, Await, NState}->
+            NRefs = gen_nbs_refs:reg(Await, Refs),
+            NInnerState = InnerState#{state => NState,
+                                      refs => NRefs,
+                                      timeout => infinity},
+            debug(?AWAIT_RET(Await), NInnerState);
+        {await, Await, NState, Time} ->
+            NRefs = gen_nbs_refs:reg(Await, Refs),
+            NInnerState = InnerState#{state => NState,
+                                      refs => NRefs,
+                                      timeout => Time},
+            debug(?AWAIT_RET(Await), NInnerState);
+        {ack, ?FROM(From, Ref)=Tag, Ack, NState} ->
+            From ! ?ACK(Ref, Ack),
+            NInnerState = InnerState#{state => NState,
+                        timeout => infinity},
+            debug(?ACK_RET(Tag), NInnerState);
         {ack, ?FROM(From, Ref)=Tag, Ack, NState, Time} ->
-            From ! ?SUCCESS(Ref, Ack),
-            NInnerState = debug(?ACK_RET(Tag),
-                                InnerState#inner_state{state=NState}),
-            NInnerState#inner_state{timeout=Time};
-        {fail, ?FROM(_From, _Ref)=Tag, Reason, NState} ->
-            handle_inner_reply({fail, Tag, Reason, NState, infinity}, Msg, InnerState);
+            From ! ?ACK(Ref, Ack),
+            NInnerState = InnerState#{state => NState,
+                        timeout => Time},
+            debug(?ACK_RET(Tag), NInnerState);
+        {fail, ?FROM(From, Ref)=Tag, Reason, NState} ->
+            From ! ?FAIL(Ref, Reason),
+            NInnerState = InnerState#{state => NState,
+                        timeout => infinity},
+            debug(?FAIL_RET(Tag), NInnerState);
         {fail, ?FROM(From, Ref)=Tag, Reason, NState, Time} ->
             From ! ?FAIL(Ref, Reason),
-            NInnerState = debug(?FAIL_RET(Tag),
-                                InnerState#inner_state{state=NState}),
-            NInnerState#inner_state{timeout=Time};
+            NInnerState = InnerState#{state => NState,
+                        timeout => Time},
+            debug(?FAIL_RET(Tag), NInnerState);
         {ok, NState} ->
-            handle_inner_reply({ok, NState, infinity}, Msg, InnerState);
+            NInnerState = InnerState#{state => NState,
+                        timeout => infinity},
+            debug(?OK_RET(NState), NInnerState);
         {ok, NState, Time} ->
-            NInnerState = debug(?OK_RET(NState),
-                                InnerState#inner_state{state=NState}),
-            NInnerState#inner_state{timeout=Time};
+            NInnerState = InnerState#{state => NState,
+                        timeout => Time},
+            debug(?OK_RET(NState), NInnerState);
         {stop, Reason, NState} ->
-            terminate(Reason, Msg, InnerState#inner_state{state=NState});
+            terminate(Reason, Msg, InnerState#{state => NState});
         BadReply ->
             terminate({bad_return_value, BadReply}, Msg, InnerState)
     end.
-
 %%-----------------------------------------------------------------
 %% Callback functions for system messages handling.
 %%-----------------------------------------------------------------
 system_continue(Parent, Debug, InnerState) ->
-    loop(InnerState#inner_state{debug=Debug, parent=Parent}).
+    loop(InnerState#{debug:=Debug, parent:=Parent}).
 
 -spec system_terminate(_, _, _, [_]) -> no_return().
 
 system_terminate(Reason, _Parent, Debug, InnerState) ->
-    terminate(Reason, [], InnerState#inner_state{debug=Debug}).
+    terminate(Reason, [], InnerState#{debug => Debug}).
 
-system_code_change(InnerState=#inner_state{mod=Mod, state=State}, _Module, OldVsn, Extra) ->
+system_code_change(InnerState=#{mod:=Mod, state:=State}, _Module, OldVsn, Extra) ->
     case catch Mod:code_change(OldVsn, State, Extra) of
-        {ok, NewState} -> {ok, InnerState#inner_state{state=NewState}};
+        {ok, NewState} -> {ok, InnerState#{state => NewState}};
         Else -> Else
     end.
 
-system_get_state(#inner_state{state=State}) ->
+system_get_state(#{state:=State}) ->
     {ok, State}.
 
-system_replace_state(StateFun, InnerState=#inner_state{state=State}) ->
+system_replace_state(StateFun, InnerState=#{state:=State}) ->
     NState = StateFun(State),
-    {ok, NState, InnerState#inner_state{state=NState}}.
+    {ok, NState, InnerState#{state => NState}}.
 
 %%% ---------------------------------------------------
 %%% Debug functions
 %%% ---------------------------------------------------
 
-debug(_Msg, InnerState=#inner_state{debug=[]}) ->
-    InnerState;
-
-debug(Msg, InnerState=#inner_state{name=Name,
-                                   debug=Debug}) ->
+debug(Msg, InnerState=#{name:=Name,
+                        debug:=Debug}) ->
     Debug1 = sys:handle_debug(Debug, fun print_event/3, Name,
                               Msg),
-    InnerState#inner_state{debug=Debug1}.
+    InnerState#{debug => Debug1}.
 
 %%-----------------------------------------------------------------
 %% Format debug messages.  Print them as the call-back module sees
@@ -705,7 +747,7 @@ debug(Msg, InnerState=#inner_state{name=Name,
 print_event(Dev, ?CAST(Msg), Name) ->
     io:format(Dev, "*DBG* ~p got cast ~p~n",
               [Name, Msg]);
-print_event(Dev, ?SUCCESS(Ref, Ack), Name) ->
+print_event(Dev, ?ACK(Ref, Ack), Name) ->
     io:format(Dev, "*DBG* ~p got acknowledgement ~p from ~p~n",
               [Name, Ack, Ref]);
 print_event(Dev, ?FAIL(Ref, Reason), Name) ->
@@ -736,11 +778,11 @@ terminate(Reason, Msg, InnerState) ->
     terminate(Reason, Reason, Msg, InnerState).
 
 -spec terminate(_, _, _, _) -> no_return().
-terminate(ExitReason, ReportReason, Msg, #inner_state{mod=Mod,
-                                                      state=State,
-                                                      name=Name,
-                                                      debug=Debug,
-                                                      refs=Refs}) ->
+terminate(ExitReason, ReportReason, Msg, #{mod:=Mod,
+                                           state:=State,
+                                           name:=Name,
+                                           debug:=Debug,
+                                           refs:=Refs}) ->
     Reply = try_terminate(Mod, ExitReason, State, Refs),
     case Reply of
         {'EXIT', ExitReason1, ReportReason1} ->
@@ -845,7 +887,7 @@ name_to_pid(Name) ->
 %% Status information
 %%-----------------------------------------------------------------
 format_status(Opt, StatusData) ->
-    [PDict, SysState, Parent, Debug, #inner_state{name=Name, mod=Mod, state=State}] = StatusData,
+    [PDict, SysState, Parent, Debug, #{name:=Name, mod:=Mod, state:=State}] = StatusData,
     Header = gen:format_status_header("Status for generic server", Name),
     Log = sys:get_debug(log, Debug, []),
     Specfic = format_status(Opt, Mod, PDict, State),

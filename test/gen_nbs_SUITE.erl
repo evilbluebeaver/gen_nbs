@@ -279,6 +279,7 @@ test_enter_loop_via(_Config) ->
                                        global:register_name(test_name, self()),
                                        gen_nbs:enter_loop(?TEST_MODULE, [], [], {via, global, test_name})
                                end),
+
     gen_nbs:stop(Pid1),
     ?WAIT_FOR_EXIT(Pid1),
     undefined = global:whereis_name(test_name),
@@ -349,35 +350,45 @@ test_error(_Config) ->
     gen_nbs:cast(Pid2, throw),
     ?WAIT_FOR_EXIT(Pid2),
 
-    {ok, Pid3} = gen_nbs:start_link(?TEST_MODULE, [], [{debug, [trace]}]),
-    gen_nbs:cast(Pid3, exit),
+    {ok, Pid3} = gen_nbs:start_link(?TEST_MODULE, [], []),
+    gen_nbs:cast(Pid3, throw),
     ?WAIT_FOR_EXIT(Pid3),
 
     {ok, Pid4} = gen_nbs:start_link(?TEST_MODULE, [], [{debug, [trace]}]),
-    catch gen_nbs:stop(Pid4, error, ?TIMEOUT),
+    gen_nbs:cast(Pid4, exit),
     ?WAIT_FOR_EXIT(Pid4),
 
     {ok, Pid5} = gen_nbs:start_link(?TEST_MODULE, [], [{debug, [trace]}]),
-    gen_nbs:stop(Pid5, throw, ?TIMEOUT),
+    catch gen_nbs:stop(Pid5, error, ?TIMEOUT),
     ?WAIT_FOR_EXIT(Pid5),
 
-    {ok, Pid6} = gen_nbs:start_link(?TEST_MODULE, [], [{debug, [trace]}]),
-    catch gen_nbs:stop(Pid6, exit, ?TIMEOUT),
+    {ok, Pid6} = gen_nbs:start_link(?TEST_MODULE, [], []),
+    gen_nbs:stop(Pid6, throw, ?TIMEOUT),
     ?WAIT_FOR_EXIT(Pid6),
 
-    {ok, Pid7} = gen_nbs:start_link(?TEST_MODULE, [], [{debug, trace}]),
-    gen_nbs:stop(Pid7, unknown, ?TIMEOUT),
+    {ok, Pid7} = gen_nbs:start_link(?TEST_MODULE, [], [{debug, [trace]}]),
+    catch gen_nbs:stop(Pid7, exit, ?TIMEOUT),
     ?WAIT_FOR_EXIT(Pid7),
+
+    {ok, Pid8} = gen_nbs:start_link(?TEST_MODULE, [], [{debug, trace}]),
+    gen_nbs:stop(Pid8, unknown, ?TIMEOUT),
+    ?WAIT_FOR_EXIT(Pid8),
 
     ok.
 
 test_misc(_Config) ->
     {ok, Pid1} = gen_nbs:start_link(?TEST_MODULE, {notify, self()}, [{debug, [trace]}]),
+    {ok, Pid2} = gen_nbs:start_link(?TEST_MODULE, {notify, self()}, []),
     gen_nbs:cast(Pid1, {timeout, ?TIMEOUT}),
+    gen_nbs:cast(Pid2, {timeout, ?TIMEOUT}),
+    timer:sleep(?TIMEOUT),
     timer:sleep(?TIMEOUT),
     ?WAIT_FOR_MSG({Pid1, {info, timeout}}),
+    ?WAIT_FOR_MSG({Pid2, {info, timeout}}),
     gen_nbs:cast(Pid1, stop),
+    gen_nbs:cast(Pid2, stop),
     ?WAIT_FOR_EXIT(Pid1),
+    ?WAIT_FOR_EXIT(Pid2),
     ok.
 
 test_info(_Config) ->
@@ -443,213 +454,239 @@ test_send(_Config) ->
     gen_nbs:cast({test_name, fake_node}, message).
 
 test_transmit(_Config) ->
-    {ok, Pid1} = gen_nbs:start(?TEST_MODULE, {notify, self()}, [{debug, [trace]}]),
-    {ok, Pid2} = gen_nbs:start(?TEST_MODULE, {notify, self()}, [{debug, [trace]}]),
-    {ok, Pid3} = gen_nbs:start({local, test_local_name}, ?TEST_MODULE, {notify, self()}, [{debug, [trace]}]),
-    {ok, Pid4} = gen_nbs:start({global, test_global_name}, ?TEST_MODULE, {notify, self()}, [{debug, [trace]}]),
+    {ok, Sender} = gen_nbs:start(?TEST_MODULE, {notify, self()}, []),
+    {ok, DebugSender} = gen_nbs:start(?TEST_MODULE, {notify, self()}, [{debug, [trace]}]),
+    {ok, Pid2} = gen_nbs:start(?TEST_MODULE, {notify, self()}, []),
+    {ok, DebugPid2} = gen_nbs:start(?TEST_MODULE, {notify, self()}, [{debug, [trace]}]),
+    {ok, DebugPid3} = gen_nbs:start({local, test_local_name}, ?TEST_MODULE, {notify, self()}, [{debug, [trace]}]),
+    {ok, DebugPid4} = gen_nbs:start({global, test_global_name}, ?TEST_MODULE, {notify, self()}, [{debug, [trace]}]),
 
     CompletionFun = fun(D) -> {ok, D} end,
 
     %%
     %% Fail
     %%
-    gen_nbs:cast(Pid1, {transmit, gen_nbs:msg(Pid2, {fail, reason})}),
-    ?WAIT_FOR_MSG({Pid2, {fail, reason, Pid1}}),
-    ?WAIT_FOR_MSG({Pid1, {fail, reason}}),
+    gen_nbs:cast(Sender, {transmit, gen_nbs:msg(Pid2, {fail, reason})}),
+    gen_nbs:cast(DebugSender, {transmit, gen_nbs:msg(DebugPid2, {fail, reason})}),
+    ?WAIT_FOR_MSG({Pid2, {fail, reason, Sender}}),
+    ?WAIT_FOR_MSG({DebugPid2, {fail, reason, DebugSender}}),
+    ?WAIT_FOR_MSG({Sender, {fail, reason}}),
+    ?WAIT_FOR_MSG({DebugSender, {fail, reason}}),
 
     %%
     %% Fail (timeout)
     %%
-    gen_nbs:cast(Pid1, {transmit, gen_nbs:msg(Pid2, {fail, reason, ?TIMEOUT})}),
-    ?WAIT_FOR_MSG({Pid2, {fail, reason, Pid1}}),
+    gen_nbs:cast(Sender, {transmit, gen_nbs:msg(DebugPid2, {fail, reason, ?TIMEOUT})}),
+    gen_nbs:cast(Sender, {transmit, gen_nbs:msg(Pid2, {fail, reason, ?TIMEOUT})}),
+    ?WAIT_FOR_MSG({DebugPid2, {fail, reason, Sender}}),
+    ?WAIT_FOR_MSG({Pid2, {fail, reason, Sender}}),
     timer:sleep(?TIMEOUT),
+    ?WAIT_FOR_MSG({DebugPid2, {info, timeout}}),
     ?WAIT_FOR_MSG({Pid2, {info, timeout}}),
-    ?WAIT_FOR_MSG({Pid1, {fail, reason}}),
+    ?WAIT_FOR_MSG({Sender, {fail, reason}}),
+    ?WAIT_FOR_MSG({Sender, {fail, reason}}),
 
     %%
     %% No ack
     %%
-    gen_nbs:cast(Pid1, {transmit, gen_nbs:msg(Pid2, {no_ack, msg}), ?TIMEOUT}),
-    ?WAIT_FOR_MSG({Pid2, {no_ack, msg, Pid1}}),
+    gen_nbs:cast(Sender, {transmit, gen_nbs:msg(DebugPid2, {no_ack, msg}), ?TIMEOUT}),
+    gen_nbs:cast(Sender, {transmit, gen_nbs:msg(Pid2, {no_ack, msg}), ?TIMEOUT}),
+    ?WAIT_FOR_MSG({DebugPid2, {no_ack, msg, Sender}}),
+    ?WAIT_FOR_MSG({Pid2, {no_ack, msg, Sender}}),
     timer:sleep(?TIMEOUT),
-    ?WAIT_FOR_MSG({Pid1, {fail, timeout}}),
+    ?WAIT_FOR_MSG({Sender, {fail, timeout}}),
+    ?WAIT_FOR_MSG({Sender, {fail, timeout}}),
 
 
     %%
     %% Ack
     %%
-    gen_nbs:cast(Pid1, {transmit, gen_nbs:msg(Pid2, {ack, msg})}),
-    ?WAIT_FOR_MSG({Pid2, {ack, msg, Pid1}}),
+    gen_nbs:cast(DebugSender, {transmit, gen_nbs:msg(DebugPid2, {ack, msg})}),
+    gen_nbs:cast(Sender, {transmit, gen_nbs:msg(Pid2, {ack, msg})}),
+    ?WAIT_FOR_MSG({DebugPid2, {ack, msg, DebugSender}}),
+    ?WAIT_FOR_MSG({Pid2, {ack, msg, Sender}}),
     timer:sleep(?TIMEOUT),
-    ?WAIT_FOR_MSG({Pid1, {ack, msg}}),
+    ?WAIT_FOR_MSG({DebugSender, {ack, msg}}),
+    ?WAIT_FOR_MSG({Sender, {ack, msg}}),
 
     %%
     %% Ack (timeout)
     %%
-    gen_nbs:cast(Pid1, {transmit, gen_nbs:msg(Pid2, {ack, msg, ?TIMEOUT})}),
-    ?WAIT_FOR_MSG({Pid2, {ack, msg, Pid1}}),
+    gen_nbs:cast(Sender, {transmit, gen_nbs:msg(DebugPid2, {ack, msg, ?TIMEOUT})}),
+    gen_nbs:cast(Sender, {transmit, gen_nbs:msg(Pid2, {ack, msg, ?TIMEOUT})}),
+    ?WAIT_FOR_MSG({DebugPid2, {ack, msg, Sender}}),
+    ?WAIT_FOR_MSG({Pid2, {ack, msg, Sender}}),
     timer:sleep(?TIMEOUT),
+    ?WAIT_FOR_MSG({DebugPid2, {info, timeout}}),
     ?WAIT_FOR_MSG({Pid2, {info, timeout}}),
-    ?WAIT_FOR_MSG({Pid1, {ack, msg}}),
+    ?WAIT_FOR_MSG({Sender, {ack, msg}}),
+    ?WAIT_FOR_MSG({Sender, {ack, msg}}),
 
     %%
     %% Ack (after timeout)
     %%
-    gen_nbs:cast(Pid1, {transmit, gen_nbs:msg(Pid2, {long_ack, msg, 2 * ?TIMEOUT}), ?TIMEOUT}),
-    ?WAIT_FOR_MSG({Pid2, {long_ack, msg, Pid1}}),
+    gen_nbs:cast(Sender, {transmit, gen_nbs:msg(DebugPid2, {long_ack, msg, 2 * ?TIMEOUT}), ?TIMEOUT}),
+    gen_nbs:cast(Sender, {transmit, gen_nbs:msg(Pid2, {long_ack, msg, 2 * ?TIMEOUT}), ?TIMEOUT}),
+    ?WAIT_FOR_MSG({DebugPid2, {long_ack, msg, Sender}}),
+    ?WAIT_FOR_MSG({Pid2, {long_ack, msg, Sender}}),
     timer:sleep(3 * ?TIMEOUT),
-    ?WAIT_FOR_MSG({Pid1, {fail, timeout}}),
+    ?WAIT_FOR_MSG({Sender, {fail, timeout}}),
+    ?WAIT_FOR_MSG({Sender, {fail, timeout}}),
 
     %%
     %% Await (timeout)
     %%
-    gen_nbs:cast(Pid1, {transmit_timeout, gen_nbs:msg(Pid2, {fail, reason}), ?TIMEOUT}),
-    ?WAIT_FOR_MSG({Pid2, {fail, reason, Pid1}}),
-    ?WAIT_FOR_MSG({Pid1, {fail, reason}}),
+    gen_nbs:cast(DebugSender, {transmit_timeout, gen_nbs:msg(DebugPid2, {fail, reason}), ?TIMEOUT}),
+    gen_nbs:cast(Sender, {transmit_timeout, gen_nbs:msg(Pid2, {fail, reason}), ?TIMEOUT}),
+    ?WAIT_FOR_MSG({DebugPid2, {fail, reason, DebugSender}}),
+    ?WAIT_FOR_MSG({Pid2, {fail, reason, Sender}}),
+    ?WAIT_FOR_MSG({DebugSender, {fail, reason}}),
+    ?WAIT_FOR_MSG({Sender, {fail, reason}}),
 
     %%
     %% Ack (package)
     %%
-    gen_nbs:cast(Pid1, {transmit, gen_nbs:package(#{tag => gen_nbs:msg(Pid2, {ack, msg})})}),
-    ?WAIT_FOR_MSG({Pid2, {ack, msg, Pid1}}),
+    gen_nbs:cast(Sender, {transmit, gen_nbs:package(#{tag => gen_nbs:msg(DebugPid2, {ack, msg})})}),
+    ?WAIT_FOR_MSG({DebugPid2, {ack, msg, Sender}}),
     timer:sleep(?TIMEOUT),
-    ?WAIT_FOR_MSG({Pid1, #{tag := {ack, msg}}}),
+    ?WAIT_FOR_MSG({Sender, #{tag := {ack, msg}}}),
 
     %%
     %% Ack (package 2)
     %%
-    gen_nbs:cast(Pid1, {transmit, gen_nbs:package(#{tag1 => gen_nbs:msg(Pid2, {ack, msg1}),
-                                                    tag2 => gen_nbs:msg(Pid2, {fail, reason})})}),
-    ?WAIT_FOR_MSG({Pid2, {ack, msg1, Pid1}}),
-    ?WAIT_FOR_MSG({Pid2, {fail, reason, Pid1}}),
+    gen_nbs:cast(Sender, {transmit, gen_nbs:package(#{tag1 => gen_nbs:msg(DebugPid2, {ack, msg1}),
+                                                    tag2 => gen_nbs:msg(DebugPid2, {fail, reason})})}),
+    ?WAIT_FOR_MSG({DebugPid2, {ack, msg1, Sender}}),
+    ?WAIT_FOR_MSG({DebugPid2, {fail, reason, Sender}}),
     timer:sleep(?TIMEOUT),
-    ?WAIT_FOR_MSG({Pid1, #{tag1 := {ack, msg1},
+    ?WAIT_FOR_MSG({Sender, #{tag1 := {ack, msg1},
                            tag2 := {fail, reason}}}),
     %%
     %% Ack (package 3)
     %%
-    gen_nbs:cast(Pid1, {transmit, gen_nbs:package(#{tag1 => gen_nbs:msg(Pid2, {ack, msg1}),
-                                                    tag2 => gen_nbs:msg(Pid2, {long_ack, msg2, 2 * ?TIMEOUT})}), ?TIMEOUT}),
-    ?WAIT_FOR_MSG({Pid2, {ack, msg1, Pid1}}),
-    ?WAIT_FOR_MSG({Pid2, {long_ack, msg2, Pid1}}),
+    gen_nbs:cast(Sender, {transmit, gen_nbs:package(#{tag1 => gen_nbs:msg(DebugPid2, {ack, msg1}),
+                                                    tag2 => gen_nbs:msg(DebugPid2, {long_ack, msg2, 2 * ?TIMEOUT})}), ?TIMEOUT}),
+    ?WAIT_FOR_MSG({DebugPid2, {ack, msg1, Sender}}),
+    ?WAIT_FOR_MSG({DebugPid2, {long_ack, msg2, Sender}}),
     timer:sleep(3 * ?TIMEOUT),
-    ?WAIT_FOR_MSG({Pid1, #{tag1 := {ack, msg1},
+    ?WAIT_FOR_MSG({Sender, #{tag1 := {ack, msg1},
                            tag2 := {fail, timeout}}}),
 
     %%
     %% Ack (package 4)
     %%
-    gen_nbs:cast(Pid1, {transmit, gen_nbs:package(#{tag1 =>
+    gen_nbs:cast(Sender, {transmit, gen_nbs:package(#{tag1 =>
                                                     #{tag11 =>
-                                                      gen_nbs:msg(Pid2, {ack, msg1}),
+                                                      gen_nbs:msg(DebugPid2, {ack, msg1}),
                                                       tag12 =>
-                                                      gen_nbs:msg(Pid2, {ack, msg2})}}), 1}),
-    ?WAIT_FOR_MSG({Pid2, {ack, msg1, Pid1}}),
-    ?WAIT_FOR_MSG({Pid2, {ack, msg2, Pid1}}),
+                                                      gen_nbs:msg(DebugPid2, {ack, msg2})}}), 1}),
+    ?WAIT_FOR_MSG({DebugPid2, {ack, msg1, Sender}}),
+    ?WAIT_FOR_MSG({DebugPid2, {ack, msg2, Sender}}),
     timer:sleep(?TIMEOUT),
-    ?WAIT_FOR_MSG({Pid1, #{tag1 := #{tag11 := {ack, msg1},
+    ?WAIT_FOR_MSG({Sender, #{tag1 := #{tag11 := {ack, msg1},
                                      tag12 := {ack, msg2}}}}),
 
     %%
     %% Ack (package 5)
     %%
-    gen_nbs:cast(Pid1, {transmit, gen_nbs:package(#{tag1 =>
+    gen_nbs:cast(Sender, {transmit, gen_nbs:package(#{tag1 =>
                                                     #{tag11 =>
-                                                      gen_nbs:msg(Pid2, {long_ack, msg1, 2 * ?TIMEOUT}),
+                                                      gen_nbs:msg(DebugPid2, {long_ack, msg1, 2 * ?TIMEOUT}),
                                                       tag12 =>
-                                                      gen_nbs:msg(Pid2, {long_ack, msg2, 2 * ?TIMEOUT})}}), ?TIMEOUT}),
-    ?WAIT_FOR_MSG({Pid2, {long_ack, msg1, Pid1}}),
-    ?WAIT_FOR_MSG({Pid2, {long_ack, msg2, Pid1}}),
+                                                      gen_nbs:msg(DebugPid2, {long_ack, msg2, 2 * ?TIMEOUT})}}), ?TIMEOUT}),
+    ?WAIT_FOR_MSG({DebugPid2, {long_ack, msg1, Sender}}),
+    ?WAIT_FOR_MSG({DebugPid2, {long_ack, msg2, Sender}}),
     timer:sleep(3 * ?TIMEOUT),
-    ?WAIT_FOR_MSG({Pid1, #{tag1 := #{tag11 := {fail, timeout},
+    ?WAIT_FOR_MSG({Sender, #{tag1 := #{tag11 := {fail, timeout},
                                      tag12 := {fail, timeout}}}}),
 
     %%
     %% Manual fail
     %%
-    gen_nbs:cast(Pid1, {transmit, gen_nbs:msg(Pid2, {manual_fail, reason})}),
-    ?WAIT_FOR_MSG({Pid2, {manual_fail, reason, Pid1}}),
-    ?WAIT_FOR_MSG({Pid1, {fail, reason}}),
+    gen_nbs:cast(Sender, {transmit, gen_nbs:msg(DebugPid2, {manual_fail, reason})}),
+    ?WAIT_FOR_MSG({DebugPid2, {manual_fail, reason, Sender}}),
+    ?WAIT_FOR_MSG({Sender, {fail, reason}}),
 
     %%
     %% Manual ack
     %%
-    gen_nbs:cast(Pid1, {transmit, gen_nbs:msg(Pid2, {manual_ack, msg})}),
-    ?WAIT_FOR_MSG({Pid2, {manual_ack, msg, Pid1}}),
-    ?WAIT_FOR_MSG({Pid1, {ack, msg}}),
+    gen_nbs:cast(Sender, {transmit, gen_nbs:msg(DebugPid2, {manual_ack, msg})}),
+    ?WAIT_FOR_MSG({DebugPid2, {manual_ack, msg, Sender}}),
+    ?WAIT_FOR_MSG({Sender, {ack, msg}}),
 
     %%
     %% Down
     %%
-    gen_nbs:cast(Pid1, {transmit, gen_nbs:msg(unknown, {manual_ack, msg})}),
-    ?WAIT_FOR_MSG({Pid1, {fail, down}}),
+    gen_nbs:cast(Sender, {transmit, gen_nbs:msg(unknown, {manual_ack, msg})}),
+    ?WAIT_FOR_MSG({Sender, {fail, down}}),
 
     %%
     %% Ack (global name)
     %%
-    gen_nbs:cast(Pid1, {transmit, gen_nbs:msg({global, test_global_name}, {ack, msg})}),
-    ?WAIT_FOR_MSG({Pid4, {ack, msg, Pid1}}),
+    gen_nbs:cast(Sender, {transmit, gen_nbs:msg({global, test_global_name}, {ack, msg})}),
+    ?WAIT_FOR_MSG({DebugPid4, {ack, msg, Sender}}),
     timer:sleep(?TIMEOUT),
-    ?WAIT_FOR_MSG({Pid1, {ack, msg}}),
+    ?WAIT_FOR_MSG({Sender, {ack, msg}}),
 
     %%
     %% Ack (via name)
     %%
-    gen_nbs:cast(Pid1, {transmit, gen_nbs:msg({via, global, test_global_name}, {ack, msg})}),
-    ?WAIT_FOR_MSG({Pid4, {ack, msg, Pid1}}),
+    gen_nbs:cast(Sender, {transmit, gen_nbs:msg({via, global, test_global_name}, {ack, msg})}),
+    ?WAIT_FOR_MSG({DebugPid4, {ack, msg, Sender}}),
     timer:sleep(?TIMEOUT),
-    ?WAIT_FOR_MSG({Pid1, {ack, msg}}),
+    ?WAIT_FOR_MSG({Sender, {ack, msg}}),
 
     %%
     %% Ack (fully qualified name)
     %%
-    gen_nbs:cast(Pid1, {transmit, gen_nbs:msg({test_local_name, node()}, {ack, msg})}),
-    ?WAIT_FOR_MSG({Pid3, {ack, msg, Pid1}}),
+    gen_nbs:cast(Sender, {transmit, gen_nbs:msg({test_local_name, node()}, {ack, msg})}),
+    ?WAIT_FOR_MSG({DebugPid3, {ack, msg, Sender}}),
     timer:sleep(?TIMEOUT),
-    ?WAIT_FOR_MSG({Pid1, {ack, msg}}),
+    ?WAIT_FOR_MSG({Sender, {ack, msg}}),
 
     %%
     %% Ack (msg completion fun)
     %%
-    gen_nbs:cast(Pid1, {transmit, gen_nbs:msg(Pid2, {ack, msg}, CompletionFun)}),
-    ?WAIT_FOR_MSG({Pid2, {ack, msg, Pid1}}),
+    gen_nbs:cast(Sender, {transmit, gen_nbs:msg(DebugPid2, {ack, msg}, CompletionFun)}),
+    ?WAIT_FOR_MSG({DebugPid2, {ack, msg, Sender}}),
     timer:sleep(?TIMEOUT),
-    ?WAIT_FOR_MSG({Pid1, {ok, {ack, msg}}}),
+    ?WAIT_FOR_MSG({Sender, {ok, {ack, msg}}}),
 
     %%
     %% Ack (msg completion fun)
     %%
     InvalidCompletionFun = fun(_) -> error(unknown) end,
-    gen_nbs:cast(Pid1, {transmit, gen_nbs:msg(Pid2, {ack, msg}, InvalidCompletionFun)}),
-    ?WAIT_FOR_MSG({Pid2, {ack, msg, Pid1}}),
+    gen_nbs:cast(Sender, {transmit, gen_nbs:msg(DebugPid2, {ack, msg}, InvalidCompletionFun)}),
+    ?WAIT_FOR_MSG({DebugPid2, {ack, msg, Sender}}),
     timer:sleep(?TIMEOUT),
-    ?WAIT_FOR_MSG({Pid1, {fail, unknown}}),
+    ?WAIT_FOR_MSG({Sender, {fail, unknown}}),
 
     %%
     %% Ack (msgs list)
     %%
-    gen_nbs:cast(Pid1, {transmit, [gen_nbs:msg(Pid2, {ack, msg1}),
-                                   gen_nbs:msg(Pid2, {ack, msg2})]}),
-    ?WAIT_FOR_MSG({Pid2, {ack, msg1, Pid1}}),
-    ?WAIT_FOR_MSG({Pid2, {ack, msg2, Pid1}}),
+    gen_nbs:cast(Sender, {transmit, [gen_nbs:msg(DebugPid2, {ack, msg1}),
+                                   gen_nbs:msg(DebugPid2, {ack, msg2})]}),
+    ?WAIT_FOR_MSG({DebugPid2, {ack, msg1, Sender}}),
+    ?WAIT_FOR_MSG({DebugPid2, {ack, msg2, Sender}}),
     timer:sleep(?TIMEOUT),
-    ?WAIT_FOR_MSG({Pid1, {ack, msg1}}),
-    ?WAIT_FOR_MSG({Pid1, {ack, msg2}}),
+    ?WAIT_FOR_MSG({Sender, {ack, msg1}}),
+    ?WAIT_FOR_MSG({Sender, {ack, msg2}}),
 
-    gen_nbs:cast(Pid1, {transmit, gen_nbs:return({fail, some_return})}),
-    ?WAIT_FOR_MSG({Pid1, {fail, some_return}}),
+    gen_nbs:cast(Sender, {transmit, gen_nbs:return({fail, some_return})}),
+    ?WAIT_FOR_MSG({Sender, {fail, some_return}}),
 
-    gen_nbs:cast(Pid1, {transmit, gen_nbs:return({ack, some_return},
+    gen_nbs:cast(Sender, {transmit, gen_nbs:return({ack, some_return},
                                                  undefined)}),
-    ?WAIT_FOR_MSG({Pid1, {ack, some_return}}),
+    ?WAIT_FOR_MSG({Sender, {ack, some_return}}),
 
-    gen_nbs:cast(Pid1, {transmit, gen_nbs:return({fail, some_return},
+    gen_nbs:cast(Sender, {transmit, gen_nbs:return({fail, some_return},
                                                  CompletionFun)}),
-    ?WAIT_FOR_MSG({Pid1, {ok, {fail, some_return}}}),
-    gen_nbs:stop(Pid1),
+    ?WAIT_FOR_MSG({Sender, {ok, {fail, some_return}}}),
+    gen_nbs:stop(Sender),
+    gen_nbs:stop(DebugPid2),
     gen_nbs:stop(Pid2),
-    gen_nbs:stop(Pid3),
-    gen_nbs:stop(Pid4),
+    gen_nbs:stop(DebugPid3),
+    gen_nbs:stop(DebugPid4),
 
     ok.
 

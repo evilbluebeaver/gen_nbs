@@ -26,7 +26,7 @@
                   parent_ref :: reference() | undefined,
                   timer_ref :: reference() | undefined,
                   completion_fun :: completion_fun(),
-                  children :: sets:sets() | undefined,
+                  children :: maps:map() | undefined,
                   results :: #{} | undefined}).
 
 

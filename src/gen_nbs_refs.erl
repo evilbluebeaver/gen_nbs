@@ -40,10 +40,10 @@ use(Result, Data, Ref,
 use(Result, Reason, Ref,
     RefRet = #ref_ret{children=Children,
                       results=Results}, Refs) ->
-    Fun = fun(ChildRef, Acc) ->
+    Fun = fun(ChildRef, ChildRef, Acc) ->
                   fill_children_results(Result, Reason, ChildRef, Acc)
           end,
-    {Results1, Refs1} = lists:foldl(Fun, {Results, Refs}, sets:to_list(Children)),
+    {Results1, Refs1} = maps:fold(Fun, {Results, Refs}, Children),
     use_result(Results1, Ref, RefRet, Refs1).
 
 use_result(Results, Ref, #ref_ret{tag=Tag,
@@ -68,31 +68,30 @@ fill_children_results(Result, Reason, Ref, {Results, Refs}) ->
     case maps:take(Ref, Refs) of
         {#ref_ret{tag=Tag,
                   children=undefined, results=undefined}, Refs1} ->
-            {maps:put(Tag, {Result, Reason}, Results), Refs1};
+            {Results#{Tag => {Result, Reason}}, Refs1};
         {#ref_ret{tag=Tag,
                   children=Children,
                   results=ChildrenResults}, Refs1} ->
-            Fun = fun(ChildRef, Acc) ->
+            Fun = fun(ChildRef, ChildRef, Acc) ->
                           fill_children_results(Result, Reason, ChildRef, Acc)
                   end,
-            {ChildrenResults2, Refs2} = lists:foldl(Fun, {ChildrenResults, Refs1},
-                                                    sets:to_list(Children)),
-            {maps:put(Tag, ChildrenResults2, Results), Refs2}
+            {ChildrenResults2, Refs2} = maps:fold(Fun, {ChildrenResults, Refs1}, Children),
+            {Results#{Tag => ChildrenResults2}, Refs2}
     end.
 
 use_parent(ChildResult, ChildRef, ChildTag, Ref, Refs) ->
     Ret=#ref_ret{children=Children,
                  results=Results} = maps:get(Ref, Refs),
-    Children1 = sets:del_element(ChildRef, Children),
-    Results1 = maps:put(ChildTag, ChildResult, Results),
-    case sets:size(Children1) of
+    Children1 = maps:remove(ChildRef, Children),
+    Results1 = Results#{ChildTag => ChildResult},
+    case maps:size(Children1) of
         0 ->
             Refs1 = maps:remove(Ref, Refs),
             use_result(Results1, Ref, Ret, Refs1);
         _ ->
             Ret1 = Ret#ref_ret{children=Children1,
                                results=Results1},
-            Refs1 = maps:put(Ref, Ret1, Refs),
+            Refs1 = Refs#{Ref => Ret1},
             {ok, Refs1}
     end.
 
@@ -101,13 +100,13 @@ results_map(undefined) ->
 results_map(_) ->
     #{}.
 
-children_set(undefined) ->
+children_map(undefined) ->
     undefined;
-children_set(Children) ->
-    Fun = fun(_Tag, #ref{ref=Ref}, Acc) ->
-                  sets:add_element(Ref, Acc)
+children_map(Children) ->
+    Fun = fun(_Tag, #ref{ref=Ref}, Refs) ->
+                  Refs#{Ref => Ref}
           end,
-    maps:fold(Fun, sets:new(), Children).
+    maps:fold(Fun, maps:new(), Children).
 
 -spec reg(await() | [await()], refs()) -> refs().
 reg(Awaits, Refs) when is_list(Awaits) ->
@@ -121,9 +120,9 @@ reg(#await{tag=Tag,
     RefRet = #ref_ret{tag=Tag,
                       timer_ref=TimerRef,
                       completion_fun=CompletionFun,
-                      children=children_set(Children),
+                      children=children_map(Children),
                       results=results_map(Children)},
-    RefsAcc = maps:put(Ref, RefRet, Refs),
+    RefsAcc = Refs#{Ref => RefRet},
     reg_children(Ref, Children, RefsAcc).
 
 reg_children(_Ref, undefined, RefsAcc) ->
@@ -134,13 +133,12 @@ reg_children(Ref, Children, RefsAcc) ->
                              completion_fun=CompletionFun,
                              children=InnerChildren},
               InnerRefsAcc) ->
-                  InnerRefsAcc1 = maps:put(InnerRef,
-                                           #ref_ret{tag=InnerTag,
-                                                    parent_ref=Ref,
-                                                    completion_fun=CompletionFun,
-                                                    children=children_set(InnerChildren),
-                                                    results=results_map(InnerChildren)},
-                                           InnerRefsAcc),
+                  InnerRefsAcc1 = InnerRefsAcc#{InnerRef =>
+                                                #ref_ret{tag=InnerTag,
+                                                         parent_ref=Ref,
+                                                         completion_fun=CompletionFun,
+                                                         children=children_map(InnerChildren),
+                                                         results=results_map(InnerChildren)}},
                   reg_children(InnerRef, InnerChildren, InnerRefsAcc1)
           end,
     maps:fold(Fun, RefsAcc, Children).

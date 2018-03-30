@@ -329,7 +329,6 @@ do_receive(Tag, Refs) ->
                              ?RES(R, Res, M) ->
                                  {R, Res, M}
                          end,
-    true = demonitor(Ref, [flush]),
     case gen_nbs_refs:use(Result, Msg, Ref, Refs) of
         {ok, Refs1} ->
             do_receive(Tag, Refs1);
@@ -559,7 +558,6 @@ try_dispatch(?CAST(Msg), Mod, State, Refs) ->
 try_dispatch(?MSG(From, Msg), Mod, State, Refs) ->
     try_handle(Mod, handle_msg, [Msg, From, State], Refs);
 try_dispatch(?RES(Ref, Result, Reason), Mod, State, Refs) ->
-    true = demonitor(Ref, [flush]),
     case gen_nbs_refs:use(Result, Reason, Ref, Refs) of
         {ok, Refs1} ->
             {ok, Refs1};

@@ -22,3 +22,5 @@ default.vim
 default.vim.lock
 cobertura.xml
 rebar.lock
+.undodir
+Session.vim

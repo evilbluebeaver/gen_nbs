@@ -576,11 +576,9 @@ try_handle(Mod, Func, Args, Refs) ->
     catch
         throw:R ->
             {ok, R, Refs};
-        error:R ->
-            Stacktrace = erlang:get_stacktrace(),
+        error:R:Stacktrace ->
             {'EXIT', {R, Stacktrace}, {R, Stacktrace}};
-        exit:R ->
-            Stacktrace = erlang:get_stacktrace(),
+        exit:R:Stacktrace ->
             {'EXIT', R, {R, Stacktrace}}
     end.
 
@@ -590,11 +588,9 @@ try_terminate(Mod, Reason, State, Refs) ->
     catch
         throw:R ->
             {ok, R, Refs};
-        error:R ->
-            Stacktrace = erlang:get_stacktrace(),
+        error:R:Stacktrace ->
             {'EXIT', {R, Stacktrace}, {R, Stacktrace}};
-        exit:R ->
-            Stacktrace = erlang:get_stacktrace(),
+        exit:R:Stacktrace ->
             {'EXIT', R, {R, Stacktrace}}
     end.
 
@@ -887,7 +883,7 @@ name_to_pid(Name) ->
 format_status(Opt, StatusData) ->
     [PDict, SysState, Parent, Debug, #{name:=Name, mod:=Mod, state:=State}] = StatusData,
     Header = gen:format_status_header("Status for generic server", Name),
-    Log = sys:get_debug(log, Debug, []),
+    Log = sys:get_log(Debug),
     Specfic = format_status(Opt, Mod, PDict, State),
     [{header, Header},
      {data, [{"Status", SysState},

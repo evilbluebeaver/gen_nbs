@@ -11,5 +11,5 @@
 
   {contributors, []},
   {licenses, ["Apache-2.0"]},
-  {links, ["https://github.com/evilbluebeaver/gen_nbs"]}
+  {links, [{"GitHub", "https://github.com/evilbluebeaver/gen_nbs"}]}
  ]}.

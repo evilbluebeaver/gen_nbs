@@ -1,6 +1,6 @@
 {application, 'gen_nbs',
  [{description, "Non-blocking server"},
-  {vsn, "0.7.3"},
+  {vsn, "0.7.4"},
   {registered, []},
   {applications,
    [kernel,
@@ -10,6 +10,6 @@
   {modules, []},
 
   {contributors, []},
-  {licenses, []},
-  {links, []}
+  {licenses, ["Apache-2.0"]},
+  {links, ["https://github.com/evilbluebeaver/gen_nbs"]}
  ]}.

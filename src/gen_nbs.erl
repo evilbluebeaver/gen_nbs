@@ -234,7 +234,14 @@ do_transmit(Msgs) when is_map(Msgs) ->
 
 do_transmit(#package{children=Children,
                      completion_fun=CompletionFun}) ->
-    #ref{ref=make_ref(),
+    Ref = make_ref(),
+    case maps:size(Children) of
+        0 ->
+            erlang:send(self(), ?ACK(Ref, #{}));
+        _ ->
+            ok
+    end,
+    #ref{ref=Ref,
          completion_fun=CompletionFun,
          children=maps:map(fun do_transmit/2, Children)};
 

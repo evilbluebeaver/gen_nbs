@@ -25,7 +25,6 @@
          stop/1, stop/3,
          return/1, return/2, msg/2, msg/3, package/1, package/2,
          transmit/2, transmit/3,
-         safe_call/1, safe_call/3,
          cast/2,
          await/1, await/2,
          ack/2, fail/2,
@@ -264,34 +263,6 @@ do_transmit(#return{payload=Payload,
     end,
     #ref{ref=Ref, completion_fun=CompletionFun}.
 
-%% -----------------------------------------------------------------
-%% Executes gen_nbs's call safely. Prevent from getting of excess messages in case of
-%% gen_nbs timeout or fail.
-%% -----------------------------------------------------------------
-
--spec safe_call(Module :: atom(),
-                Fun :: atom(),
-                Args :: [term()]) ->
-    term().
-safe_call(Module, Fun, Args) ->
-    safe_call(fun() -> erlang:apply(Module, Fun, Args) end).
-
--spec safe_call(Fun :: fun(() -> term())) ->
-    term().
-safe_call(Fun) ->
-    Self = self(),
-    Pid = spawn(fun() ->
-                        Result = Fun(),
-                        Self ! {result, Result}
-                end),
-    Ref = erlang:monitor(process, Pid),
-    receive
-        {result, Result} ->
-            true = erlang:demonitor(Ref, [flush]),
-            Result;
-        {'DOWN', Ref, process, Pid, Reason} when Reason /= normal ->
-            exit(Reason)
-    end.
 
 %% -----------------------------------------------------------------
 %% Manual ack/fail
